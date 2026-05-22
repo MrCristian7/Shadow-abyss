@@ -29,8 +29,8 @@ const {
 const fs = require("fs");
 
 const TOKEN          = process.env.SA_BOT_TOKEN;
-const CHANNEL_ID     = "1500795202028310638";
-const LOG_CHANNEL_ID = "1256746466240630934";
+const CHANNEL_ID     = "1504789868834852936";
+const LOG_CHANNEL_ID = "1501499727877898311";
 
 if (!TOKEN) {
   console.error("ERROR: Missing SA_BOT_TOKEN environment variable.");
@@ -75,6 +75,8 @@ let lastBackupRepost = 0;
 let lastRepinTime    = 0;
 // Counter for interactions since last repin
 let actionsSinceRepin = 0;
+// Whether to show all bosses (full) or only those with active timers (compact)
+let showFullDashboard = false;
 
 const BACKUP_REPOST_COOLDOWN_MS = 60 * 1000;
 const BOT_START_TIME   = Date.now();
@@ -383,7 +385,6 @@ function restoreSpawnWarningFlags() {
       const advanceCount = missedCount[b.id] || 0;
       if (advanceCount < SA_MAX_AUTO_ADVANCE) {
         const nextWindowStart = e.respawnTime;
-        // Always give a full 2h window from now so the countdown is meaningful
         const nextWindowEnd   = now + (SA_GOBLIN_WINDOW_MS + 60 * 60 * 1000);
         const untilEnd        = nextWindowEnd - now;
         if (untilEnd + WINDOW_GRACE_MS > 0) {
@@ -401,7 +402,6 @@ function restoreSpawnWarningFlags() {
     }
     if (!isGoblin && windowExpired) {
       const nextWindowStart = e.respawnTime;
-      // Always give a full SA_FIXED_MISSED_WINDOW_MS window from now
       const nextWindowEnd   = now + SA_FIXED_MISSED_WINDOW_MS;
       const untilEnd        = nextWindowEnd - now;
       if (untilEnd + WINDOW_GRACE_MS > 0) {
@@ -438,7 +438,6 @@ function restoreSpawnWarningFlags() {
       const advanceCount = missedCount[b.id] || 0;
       if (advanceCount < config.maxMissed) {
         const nextWindowStart = e.respawnTime;
-        // Always give a full missedWindowMs from now on restore
         const nextWindowEnd   = now + config.missedWindowMs;
         const untilEnd        = nextWindowEnd - now;
         if (untilEnd + WINDOW_GRACE_MS > 0) {
@@ -464,19 +463,20 @@ function restoreSpawnWarningFlags() {
 // =====================
 async function recoverFromDiscordBackup() {
   const now = Date.now();
-  const localEmpty =
-    !fs.existsSync("sa_data.json") ||
-    (() => {
-      try {
-        const d = JSON.parse(fs.readFileSync("sa_data.json", "utf8"));
-        return !d.kills || Object.values(d.kills).every(e => e.respawnTime < now - 2 * 60 * 60 * 1000);
-      } catch { return true; }
-    })();
-  if (!localEmpty) {
-    console.log("[Recovery] Local sa_data.json exists and has timers — skipping Discord recovery.");
-    return false;
+
+  let localActiveCount = 0;
+  if (fs.existsSync("sa_data.json")) {
+    try {
+      const d = JSON.parse(fs.readFileSync("sa_data.json", "utf8"));
+      if (d.kills) {
+        localActiveCount = Object.values(d.kills)
+          .filter(e => e.respawnTime >= now - 8 * 60 * 60 * 1000).length;
+      }
+    } catch { localActiveCount = 0; }
   }
-  console.log("[Recovery] Scanning Discord for latest backup...");
+
+  console.log(`[Recovery] Local active timers: ${localActiveCount}. Scanning Discord for backup...`);
+
   try {
     const backupCh   = await client.channels.fetch(LOG_CHANNEL_ID);
     const fetched    = await backupCh.messages.fetch({ limit: 100 });
@@ -485,20 +485,36 @@ async function recoverFromDiscordBackup() {
       m.attachments.size > 0 &&
       [...m.attachments.values()].some(a => a.name && a.name.endsWith(".json"))
     );
-    if (!candidates.length) { console.warn("[Recovery] No backup messages found."); return false; }
-    const best       = candidates.sort((a, b) => b.editedTimestamp - a.editedTimestamp)[0];
+    if (!candidates.length) {
+      console.warn("[Recovery] No backup messages found in Discord.");
+      return false;
+    }
+    const best = candidates.sort((a, b) =>
+      (b.editedTimestamp ?? b.createdTimestamp) - (a.editedTimestamp ?? a.createdTimestamp)
+    )[0];
     const attachment = [...best.attachments.values()].find(a => a.name.endsWith(".json"));
     const response   = await fetch(attachment.url);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const json = await response.json();
     if (!json.kills) throw new Error("Backup JSON has no 'kills' field");
+
+    const discordActiveCount = Object.values(json.kills)
+      .filter(e => e.respawnTime >= now - 8 * 60 * 60 * 1000).length;
+
+    console.log(`[Recovery] Discord backup active timers: ${discordActiveCount}.`);
+
+    if (discordActiveCount <= localActiveCount) {
+      console.log("[Recovery] Local data is equal or fresher — skipping Discord restore.");
+      return false;
+    }
+
     const filtered = {};
     for (const [id, entry] of Object.entries(json.kills)) {
       if (entry.respawnTime >= now - 8 * 60 * 60 * 1000) filtered[id] = entry;
     }
     data = { kills: filtered };
     save();
-    console.log(`[Recovery] Restored ${Object.keys(filtered).length} active timer(s).`);
+    console.log(`[Recovery] Restored ${Object.keys(filtered).length} active timer(s) from Discord backup.`);
     return true;
   } catch (err) {
     console.error("[Recovery] Failed:", err);
@@ -776,12 +792,10 @@ async function announceAdmin(channel, user, action) {
 
 // =====================
 // @EVERYONE WARNINGS
-// Bosses in NO_EVERYONE_PING_KEYS send a suppressed (no-ping) message instead.
 // =====================
 async function postEveryoneWarning(channel, key, content, lifespanMs = EVERYONE_WARNING_LIFESPAN_MS, bossKey = null) {
   await clearEveryoneWarning(key);
 
-  // Replace @everyone with a plain mention for frequent-spawn bosses
   const suppressPing = bossKey && NO_EVERYONE_PING_KEYS.has(bossKey);
   const sendContent  = suppressPing ? content.replace(/@everyone /g, "") : content;
   const sendOptions  = suppressPing
@@ -933,7 +947,11 @@ function buildWBMissedWindowComponents(id) {
 }
 
 // =====================
-// DASHBOARD HELPERS — slot renderers
+// DASHBOARD HELPERS — slot renderers (PATCHED)
+//
+// Changes:
+//  1. Missed-window state always shows ⚠️ (even if cooldown is still active or slot was "ready")
+//  2. Every slot with kill data shows the last killer and a Discord local-time timestamp
 // =====================
 
 function renderGoblinSlot(b) {
@@ -941,39 +959,77 @@ function renderGoblinSlot(b) {
   const e        = data.kills[b.id];
   const advCount = missedCount[b.id] || 0;
   const locked   = advCount >= SA_MAX_AUTO_ADVANCE;
-  if (!e) return { text: `#${b.index} 🟢`, isMissed: false };
+  const isMissed = !!missedWindowMessages[b.id];
+
+  if (!e) {
+    // No kill data at all — but if a missed window is somehow active, flag it
+    return isMissed
+      ? { text: `#${b.index} ⚠️ x${advCount}${locked ? "🔒" : ""}`, isMissed: true, isReady: false }
+      : { text: `#${b.index} 🟢`, isMissed: false, isReady: true };
+  }
+
+  const killerTag  = `*(${e.lastKiller})*`;
+  const localTime  = `<t:${Math.floor(e.respawnTime / 1000)}:t>`;
   const cooldown   = e.respawnTime - now;
   const windowEnd  = e.respawnTime + SA_GOBLIN_WINDOW_MS;
   const windowLeft = windowEnd - now;
+
   if (cooldown > 0) {
-    const isMissed = !!missedWindowMessages[b.id];
     if (isMissed) {
-      const respawnStr = toServerTimeStr(e.respawnTime);
-      return { text: `#${b.index} ⚠️ ${format(cooldown)} @${respawnStr} x${advCount}${locked ? "🔒" : ""}`, isMissed: true };
+      return {
+        text: `#${b.index} ⚠️ ${format(cooldown)} → ${localTime} x${advCount}${locked ? "🔒" : ""} ${killerTag}`,
+        isMissed: true, isReady: false,
+      };
     }
-    return { text: `#${b.index} 🔴 ${format(cooldown)}`, isMissed: false };
+    return {
+      text: `#${b.index} 🔴 ${format(cooldown)} → ${localTime} ${killerTag}`,
+      isMissed: false, isReady: false,
+    };
   }
-  if (windowLeft > 0) return { text: `#${b.index} 🟢 ${format(windowLeft)}`, isMissed: false };
-  if (locked) return { text: `#${b.index} 🔒`, isMissed: true };
-  return { text: `#${b.index} ⚠️ x${advCount}`, isMissed: true };
+  if (windowLeft > 0) {
+    return {
+      text: `#${b.index} 🟢 ${format(windowLeft)} left ${killerTag}`,
+      isMissed: false, isReady: false,
+    };
+  }
+  if (locked) {
+    return { text: `#${b.index} 🔒 x${advCount} ${killerTag}`, isMissed: true, isReady: false };
+  }
+  return { text: `#${b.index} ⚠️ x${advCount} ${killerTag}`, isMissed: true, isReady: false };
 }
 
 function renderSAFixedSlot(b) {
   const now      = Date.now();
   const e        = data.kills[b.id];
   const advCount = missedCount[b.id] || 0;
-  if (!e) return { text: `#${b.index} 🟢`, isMissed: false };
-  const cooldown = e.respawnTime - now;
-  if (cooldown > 0) {
-    const isMissed = !!missedWindowMessages[b.id];
-    if (isMissed) {
-      const respawnStr = toServerTimeStr(e.respawnTime);
-      return { text: `#${b.index} ⚠️ ${format(cooldown)} @${respawnStr} x${advCount}`, isMissed: true };
-    }
-    return { text: `#${b.index} 🔴 ${format(cooldown)}`, isMissed: false };
+  const isMissed = !!missedWindowMessages[b.id];
+
+  if (!e) {
+    return isMissed
+      ? { text: `#${b.index} ⚠️ x${advCount}`, isMissed: true, isReady: false }
+      : { text: `#${b.index} 🟢`, isMissed: false, isReady: true };
   }
-  if (cooldown >= -5 * 60 * 1000) return { text: `#${b.index} 🟡 SPAWNED`, isMissed: false };
-  return { text: `#${b.index} ⚠️ x${advCount}`, isMissed: true };
+
+  const killerTag = `*(${e.lastKiller})*`;
+  const localTime = `<t:${Math.floor(e.respawnTime / 1000)}:t>`;
+  const cooldown  = e.respawnTime - now;
+
+  if (cooldown > 0) {
+    if (isMissed) {
+      return {
+        text: `#${b.index} ⚠️ ${format(cooldown)} → ${localTime} x${advCount} ${killerTag}`,
+        isMissed: true, isReady: false,
+      };
+    }
+    return {
+      text: `#${b.index} 🔴 ${format(cooldown)} → ${localTime} ${killerTag}`,
+      isMissed: false, isReady: false,
+    };
+  }
+  if (cooldown >= -5 * 60 * 1000) {
+    return { text: `#${b.index} 🟡 SPAWNED ${killerTag}`, isMissed: false, isReady: false };
+  }
+  return { text: `#${b.index} ⚠️ x${advCount} ${killerTag}`, isMissed: true, isReady: false };
 }
 
 function renderWBMultiSlot(b) {
@@ -982,41 +1038,74 @@ function renderWBMultiSlot(b) {
   const cfg      = getWorldBossConfig(b.id);
   const advCount = missedCount[b.id] || 0;
   const isMissed = !!missedWindowMessages[b.id];
-  if (!e) return { text: `#${b.index} 🟢`, isMissed: false };
+
+  if (!e) {
+    return isMissed
+      ? { text: `#${b.index} ⚠️ x${advCount}`, isMissed: true, isReady: false }
+      : { text: `#${b.index} 🟢`, isMissed: false, isReady: true };
+  }
+
+  const killerTag  = `*(${e.lastKiller})*`;
+  const localTime  = `<t:${Math.floor(e.respawnTime / 1000)}:t>`;
   const cooldown   = e.respawnTime - now;
   const windowEnd  = e.respawnTime + cfg.windowMs;
   const windowLeft = windowEnd - now;
+
   if (cooldown > 0) {
     if (isMissed) {
-      const respawnStr = toServerTimeStr(e.respawnTime);
-      return { text: `#${b.index} ⚠️ ${format(cooldown)} @${respawnStr} x${advCount}`, isMissed: true };
+      return {
+        text: `#${b.index} ⚠️ ${format(cooldown)} → ${localTime} x${advCount} ${killerTag}`,
+        isMissed: true, isReady: false,
+      };
     }
-    return { text: `#${b.index} 🔴 ${format(cooldown)}`, isMissed: false };
+    return {
+      text: `#${b.index} 🔴 ${format(cooldown)} → ${localTime} ${killerTag}`,
+      isMissed: false, isReady: false,
+    };
   }
-  if (windowLeft > 0) return { text: `#${b.index} 🟢 WIN ${format(windowLeft)}`, isMissed: false };
-  if (advCount >= cfg.maxMissed) return { text: `#${b.index} 🚨 x${advCount}`, isMissed: true };
-  return { text: `#${b.index} ⚠️ x${advCount}`, isMissed: true };
+  if (windowLeft > 0) {
+    return {
+      text: `#${b.index} 🟢 WIN ${format(windowLeft)} ${killerTag}`,
+      isMissed: false, isReady: false,
+    };
+  }
+  if (advCount >= cfg.maxMissed) {
+    return { text: `#${b.index} 🚨 x${advCount} ${killerTag}`, isMissed: true, isReady: false };
+  }
+  return { text: `#${b.index} ⚠️ x${advCount} ${killerTag}`, isMissed: true, isReady: false };
 }
 
-// =====================
-// DASHBOARD — helpers for single-instance SA fixed & WB bosses
-// =====================
+// ── Single-instance renderers ──────────────────────────────────────────────
 
 function renderSAFixedSingle(id) {
   const now      = Date.now();
   const e        = data.kills[id];
   const advCount = missedCount[id] || 0;
   const isMissed = !!missedWindowMessages[id];
-  if (!e) return "🟢";
-  const cooldown = e.respawnTime - now;
+
+  if (!e) {
+    return isMissed
+      ? { text: `⚠️ x${advCount}`, isReady: false }
+      : { text: "🟢", isReady: true };
+  }
+
+  const killerTag = `*(${e.lastKiller})*`;
+  const localTime = `<t:${Math.floor(e.respawnTime / 1000)}:t>`;
+  const cooldown  = e.respawnTime - now;
+
   if (cooldown > 0) {
     if (isMissed) {
-      return `⚠️ ${format(cooldown)} @${toServerTimeStr(e.respawnTime)} x${advCount}`;
+      return {
+        text: `⚠️ ${format(cooldown)} → ${localTime} x${advCount} ${killerTag}`,
+        isReady: false,
+      };
     }
-    return `🔴 ${format(cooldown)} → ${toServerTimeStr(e.respawnTime)}`;
+    return { text: `🔴 ${format(cooldown)} → ${localTime} ${killerTag}`, isReady: false };
   }
-  if (cooldown >= -5 * 60 * 1000) return `🟡 SPAWNED`;
-  return `⚠️ x${advCount} (last kill ${toServerTimeStr(e.killTime)})`;
+  if (cooldown >= -5 * 60 * 1000) {
+    return { text: `🟡 SPAWNED ${killerTag}`, isReady: false };
+  }
+  return { text: `⚠️ x${advCount} (last kill ${toServerTimeStr(e.killTime)}) ${killerTag}`, isReady: false };
 }
 
 function renderWBSingle(id) {
@@ -1025,57 +1114,153 @@ function renderWBSingle(id) {
   const cfg      = getWorldBossConfig(id);
   const advCount = missedCount[id] || 0;
   const isMissed = !!missedWindowMessages[id];
-  if (!e) return "🟢";
+
+  if (!e) {
+    return isMissed
+      ? { text: `⚠️ x${advCount}`, isReady: false }
+      : { text: "🟢", isReady: true };
+  }
+
+  const killerTag  = `*(${e.lastKiller})*`;
+  const localTime  = `<t:${Math.floor(e.respawnTime / 1000)}:t>`;
   const cooldown   = e.respawnTime - now;
   const windowEnd  = e.respawnTime + cfg.windowMs;
   const windowLeft = windowEnd - now;
+
   if (cooldown > 0) {
     if (isMissed) {
-      return `⚠️ ${format(cooldown)} @${toServerTimeStr(e.respawnTime)} x${advCount}`;
+      return {
+        text: `⚠️ ${format(cooldown)} → ${localTime} x${advCount} ${killerTag}`,
+        isReady: false,
+      };
     }
-    return `🔴 ${format(cooldown)} → ${toServerTimeStr(e.respawnTime)}`;
+    return { text: `🔴 ${format(cooldown)} → ${localTime} ${killerTag}`, isReady: false };
   }
-  if (windowLeft > 0) return `🟢 WIN ${format(windowLeft)}`;
-  if (advCount >= cfg.maxMissed) return `🚨 x${advCount} (last kill ${toServerTimeStr(e.killTime)})`;
-  return `⚠️ x${advCount} (last kill ${toServerTimeStr(e.killTime)})`;
+  if (windowLeft > 0) {
+    return { text: `🟢 WIN ${format(windowLeft)} ${killerTag}`, isReady: false };
+  }
+  if (advCount >= cfg.maxMissed) {
+    return { text: `🚨 x${advCount} (last kill ${toServerTimeStr(e.killTime)}) ${killerTag}`, isReady: false };
+  }
+  return { text: `⚠️ x${advCount} (last kill ${toServerTimeStr(e.killTime)}) ${killerTag}`, isReady: false };
+}
+
+// =====================
+// DASHBOARD HELPERS — active-timer checks
+// =====================
+
+function goblinKeyHasTimer(key, server) {
+  return getGoblinInstances(key, server).some(b => !!data.kills[b.id]);
+}
+
+function anyGoblinServerHasTimer(server) {
+  const goblinKeys = [...new Set(SHADOW_BOSSES.filter(b => b.type === "goblin").map(b => b.key))];
+  return goblinKeys.some(key => goblinKeyHasTimer(key, server));
+}
+
+function saFixedKeyHasTimer(key, server) {
+  const isMulti = isMultiInstanceSAFixed(key);
+  if (isMulti) return getSAFixedInstances(key, server).some(b => !!data.kills[b.id]);
+  return !!data.kills[`sa_${key}_s${server}`];
+}
+
+function tierHasTimerForServer(keys, server) {
+  return keys.some(key => saFixedKeyHasTimer(key, server));
+}
+
+function wbHasTimerForServer(server) {
+  return [...new Set(WORLD_BOSSES.map(b => b.key))].some(key => {
+    const isMulti = isMultiInstanceWB(key);
+    if (isMulti) return getWBInstances(key, server).some(b => !!data.kills[b.id]);
+    return !!data.kills[`wb_${key}_s${server}`];
+  });
+}
+
+// =====================
+// ACTIVE-STATE CHECKS
+// Returns true if a slot has a meaningful (non-ready) state to display in compact mode.
+// "Ready" = no kill data at all (pure 🟢 with no timer).
+// =====================
+
+function goblinKeyHasActiveSlot(key, server) {
+  return getGoblinInstances(key, server).some(b => {
+    const rendered = renderGoblinSlot(b);
+    return !rendered.isReady;
+  });
+}
+
+function anyGoblinServerHasActiveSlot(server) {
+  const goblinKeys = [...new Set(SHADOW_BOSSES.filter(b => b.type === "goblin").map(b => b.key))];
+  return goblinKeys.some(key => goblinKeyHasActiveSlot(key, server));
+}
+
+function saFixedKeyHasActiveSlot(key, server) {
+  const isMulti = isMultiInstanceSAFixed(key);
+  if (isMulti) {
+    return getSAFixedInstances(key, server).some(b => !renderSAFixedSlot(b).isReady);
+  }
+  return !renderSAFixedSingle(`sa_${key}_s${server}`).isReady;
+}
+
+function tierHasActiveSlotForServer(keys, server) {
+  return keys.some(key => saFixedKeyHasActiveSlot(key, server));
+}
+
+function wbHasActiveSlotForServer(server) {
+  return [...new Set(WORLD_BOSSES.map(b => b.key))].some(key => {
+    const isMulti = isMultiInstanceWB(key);
+    if (isMulti) return getWBInstances(key, server).some(b => !renderWBMultiSlot(b).isReady);
+    return !renderWBSingle(`wb_${key}_s${server}`).isReady;
+  });
 }
 
 // =====================
 // DASHBOARD EMBED
-// Layout:
-//   - Goblins:    3 inline fields (S1 | S2 | S3), each listing all goblin types for that server
-//   - SA Bosses:  grouped by respawn tier; 3 inline fields (S1 | S2 | S3), each listing all
-//                 bosses of that tier for that server — one compact row per tier
-//   - World Bosses: 3 inline fields (S1 | S2 | S3), each listing all WBs for that server
 // =====================
-function buildShadowEmbed() {
+function buildShadowEmbed(full = showFullDashboard) {
   const embed = new EmbedBuilder()
-    .setTitle("🌑 SHADOW ABYSS TRACKER")
+    .setTitle(full ? "🌑 SHADOW ABYSS TRACKER — Full View" : "🌑 SHADOW ABYSS TRACKER")
     .setColor(0x7b00ff)
-    .setFooter({ text: "Auto-updates every 15s" });
+    .setFooter({ text: `Auto-updates every 15s${full ? " • Full view" : " • Compact view — tap 🔍 to expand"}` });
 
-  // ── Section 1: Goblins — 3 inline fields (S1, S2, S3) ──────────────────
+  // ── Section 1: Goblins ──────────────────────────────────────────────────
   const goblinKeys = [...new Set(SHADOW_BOSSES.filter(b => b.type === "goblin").map(b => b.key))];
 
-  for (const s of SA_SERVERS) {
-    const lines = goblinKeys.map(key => {
-      const first     = SHADOW_BOSSES.find(b => b.key === key);
-      const instances = getGoblinInstances(key, s);
-      const slots     = instances.map(b => renderGoblinSlot(b).text).join("  ");
-      return `**${first.label}**\n${slots}`;
-    });
-    embed.addFields({
-      name:   `👺 Goblins — S${s}`,
-      value:  lines.join("\n\n"),
-      inline: true,
-    });
+  const goblinServers = full
+    ? SA_SERVERS
+    : SA_SERVERS.filter(s => anyGoblinServerHasActiveSlot(s));
+
+  if (goblinServers.length > 0) {
+    for (const s of goblinServers) {
+      const visibleKeys = full
+        ? goblinKeys
+        : goblinKeys.filter(key => goblinKeyHasActiveSlot(key, s));
+      if (!visibleKeys.length) continue;
+
+      const lines = visibleKeys.map(key => {
+        const first     = SHADOW_BOSSES.find(b => b.key === key);
+        const instances = getGoblinInstances(key, s);
+
+        if (full) {
+          const slots = instances.map(b => renderGoblinSlot(b).text).join("  ");
+          return `**${first.label}**\n${slots}`;
+        } else {
+          const activeSlots = instances
+            .map(b => renderGoblinSlot(b))
+            .filter(r => !r.isReady)
+            .map(r => r.text)
+            .join("  ");
+          return activeSlots ? `**${first.label}**\n${activeSlots}` : null;
+        }
+      }).filter(Boolean);
+
+      if (!lines.length) continue;
+      embed.addFields({ name: `👺 Goblins — S${s}`, value: lines.join("\n\n"), inline: true });
+    }
+    embed.addFields({ name: "\u200b", value: "\u200b", inline: false });
   }
 
-  // spacer so next section starts on a new row
-  embed.addFields({ name: "\u200b", value: "\u200b", inline: false });
-
-  // ── Section 2: SA Fixed + World Bosses — grouped by tier, 3 columns (S1|S2|S3) ──
-  // Build tier map for SA fixed bosses
+  // ── Section 2: SA Fixed Bosses ──────────────────────────────────────────
   const fixedKeys = [...new Set(SHADOW_BOSSES.filter(b => b.type !== "goblin").map(b => b.key))];
   const tierMap = {};
   for (const key of fixedKeys) {
@@ -1085,53 +1270,101 @@ function buildShadowEmbed() {
     tierMap[respawnH].push(key);
   }
 
-  // One row of 3 fields per SA tier
   for (const [respawnH, keys] of Object.entries(tierMap).sort((a, b) => Number(a[0]) - Number(b[0]))) {
-    for (const s of SA_SERVERS) {
-      const lines = keys.map(key => {
+    const tierServers = full
+      ? SA_SERVERS
+      : SA_SERVERS.filter(s => tierHasActiveSlotForServer(keys, s));
+    if (!tierServers.length) continue;
+
+    for (const s of tierServers) {
+      const visibleKeys = full
+        ? keys
+        : keys.filter(key => saFixedKeyHasActiveSlot(key, s));
+      if (!visibleKeys.length) continue;
+
+      const lines = visibleKeys.map(key => {
         const first   = SHADOW_BOSSES.find(b => b.key === key);
         const isMulti = isMultiInstanceSAFixed(key);
-        let status;
+
         if (isMulti) {
           const instances = getSAFixedInstances(key, s);
-          status = instances.map(b => renderSAFixedSlot(b).text).join("  ");
+          if (full) {
+            const slots = instances.map(b => renderSAFixedSlot(b).text).join("  ");
+            return `**${first.label}**\n${slots}`;
+          } else {
+            const activeSlots = instances
+              .map(b => renderSAFixedSlot(b))
+              .filter(r => !r.isReady)
+              .map(r => r.text)
+              .join("  ");
+            return activeSlots ? `**${first.label}**\n${activeSlots}` : null;
+          }
         } else {
-          const id = `sa_${key}_s${s}`;
-          status = renderSAFixedSingle(id);
+          const result = renderSAFixedSingle(`sa_${key}_s${s}`);
+          if (!full && result.isReady) return null;
+          return `**${first.label}**\n${result.text}`;
         }
-        return `**${first.label}**\n${status}`;
-      });
-      embed.addFields({
-        name:   `👹 SA Bosses *(${respawnH}h)* — S${s}`,
-        value:  lines.join("\n\n"),
-        inline: true,
-      });
+      }).filter(Boolean);
+
+      if (!lines.length) continue;
+      embed.addFields({ name: `👹 SA Bosses *(${respawnH}h)* — S${s}`, value: lines.join("\n\n"), inline: true });
     }
     embed.addFields({ name: "\u200b", value: "\u200b", inline: false });
   }
 
-  // One row of 3 fields for all World Bosses (S1|S2|S3)
+  // ── Section 3: World Bosses ──────────────────────────────────────────────
   const wbKeys = [...new Set(WORLD_BOSSES.map(b => b.key))];
-  for (const s of SA_SERVERS) {
-    const lines = wbKeys.map(key => {
-      const cfg     = WORLD_BOSS_CONFIG[key];
-      const label   = WORLD_BOSSES.find(b => b.key === key).label;
-      const isMulti = isMultiInstanceWB(key);
-      let status;
-      if (isMulti) {
-        const instances = getWBInstances(key, s);
-        status = instances.map(b => renderWBMultiSlot(b).text).join("  ");
-      } else {
-        const id = `wb_${key}_s${s}`;
-        status = renderWBSingle(id);
-      }
-      return `**${label}** *(${cfg.respawnMs / HOUR}h)*\n${status}`;
-    });
-    embed.addFields({
-      name:   `🌍 World Bosses — S${s}`,
-      value:  lines.join("\n\n"),
-      inline: true,
-    });
+  const wbServers = full
+    ? SA_SERVERS
+    : SA_SERVERS.filter(s => wbHasActiveSlotForServer(s));
+
+  if (wbServers.length > 0) {
+    for (const s of wbServers) {
+      const visibleWBKeys = full
+        ? wbKeys
+        : wbKeys.filter(key => {
+            const isMulti = isMultiInstanceWB(key);
+            if (isMulti) return getWBInstances(key, s).some(b => !renderWBMultiSlot(b).isReady);
+            return !renderWBSingle(`wb_${key}_s${s}`).isReady;
+          });
+      if (!visibleWBKeys.length) continue;
+
+      const lines = visibleWBKeys.map(key => {
+        const cfg     = WORLD_BOSS_CONFIG[key];
+        const label   = WORLD_BOSSES.find(b => b.key === key).label;
+        const isMulti = isMultiInstanceWB(key);
+
+        if (isMulti) {
+          const instances = getWBInstances(key, s);
+          if (full) {
+            const slots = instances.map(b => renderWBMultiSlot(b).text).join("  ");
+            return `**${label}** *(${cfg.respawnMs / HOUR}h)*\n${slots}`;
+          } else {
+            const activeSlots = instances
+              .map(b => renderWBMultiSlot(b))
+              .filter(r => !r.isReady)
+              .map(r => r.text)
+              .join("  ");
+            return activeSlots ? `**${label}** *(${cfg.respawnMs / HOUR}h)*\n${activeSlots}` : null;
+          }
+        } else {
+          const result = renderWBSingle(`wb_${key}_s${s}`);
+          if (!full && result.isReady) return null;
+          return `**${label}** *(${cfg.respawnMs / HOUR}h)*\n${result.text}`;
+        }
+      }).filter(Boolean);
+
+      if (!lines.length) continue;
+      embed.addFields({ name: `🌍 World Bosses — S${s}`, value: lines.join("\n\n"), inline: true });
+    }
+  }
+
+  // If nothing to show in compact mode
+  if (!full) {
+    const hasAnyField = embed.data.fields && embed.data.fields.some(f => f.name !== "\u200b");
+    if (!hasAnyField) {
+      embed.setDescription("✅ No active timers — all bosses are ready to kill!\n\nTap **🔍 Show All** to see the full list.");
+    }
   }
 
   return embed;
@@ -1192,7 +1425,11 @@ function buildShadowButtons() {
     new ButtonBuilder().setCustomId("sa_insert_time").setLabel("📝 Insert").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId("sa_reset").setLabel("🧹 Reset").setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId("sa_undo").setLabel("↩️ Undo").setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId("show_logs").setLabel("📜 Logs").setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId("show_logs").setLabel("📜 Logs").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("toggle_full_dashboard")
+      .setLabel(showFullDashboard ? "🔼 Compact" : "🔍 Show All")
+      .setStyle(showFullDashboard ? ButtonStyle.Primary : ButtonStyle.Secondary)
   ));
 
   return rows;
@@ -1200,8 +1437,6 @@ function buildShadowButtons() {
 
 // =====================
 // REPIN DASHBOARD
-// Stack order: Log → Dashboard → Missed windows → Active spawn windows
-// (spawn windows have higher priority so they sit closer to the bottom / most recent)
 // =====================
 async function repinDashboard(channel) {
   if (repinInProgress) { console.log("[Repin] Already in progress, skipping."); return; }
@@ -1223,7 +1458,6 @@ async function repinDashboard(channel) {
     if (dashboardMessage) dashboardMessage.delete().catch(() => {});
     dashboardMessage = newDashboard;
 
-    // ── Post missed windows first (lower priority, posted earlier = higher up) ──
     for (const id of Object.keys(missedWindowMessages)) {
       const w = missedWindowMessages[id];
       if (w.nextWindowStart > now) { if (w.msg) { w.msg.delete().catch(() => {}); w.msg = null; } continue; }
@@ -1242,7 +1476,6 @@ async function repinDashboard(channel) {
       }).catch(() => null);
     }
 
-    // ── Post active spawn windows last (highest priority = most recent = bottom) ──
     for (const id of Object.keys(spawnWindowMessages)) {
       const w = spawnWindowMessages[id];
       if (w.msg) w.msg.delete().catch(() => {});
@@ -1268,7 +1501,7 @@ async function repinDashboard(channel) {
 async function maybeRepinAfterAction(channel) {
   actionsSinceRepin++;
   const now = Date.now();
-  const timerElapsed  = now - lastRepinTime >= REPIN_INTERVAL_MS;
+  const timerElapsed   = now - lastRepinTime >= REPIN_INTERVAL_MS;
   const actionsReached = actionsSinceRepin >= REPIN_AFTER_ACTIONS;
   if ((timerElapsed || actionsReached) && !repinInProgress) {
     console.log(`[Repin] Triggered by interaction (actions=${actionsSinceRepin}, timerElapsed=${timerElapsed})`);
@@ -1332,7 +1565,6 @@ async function handleSAMissedWindowGoblin(boss, id, channel) {
   clearSABossCards(id, false);
   const now = Date.now();
   const nextWindowStart = e.respawnTime;
-  // Always give a full 2h window from now so the countdown is meaningful
   const nextWindowEnd   = now + (SA_GOBLIN_WINDOW_MS + 60 * 60 * 1000);
   missedWindowMessages[id] = {
     msg: null, deleteTimer: null,
@@ -1359,7 +1591,6 @@ async function handleSAMissedWindowGoblin(boss, id, channel) {
 
 // =====================
 // MISSED WINDOW — Shadow Abyss fixed-respawn types
-// Window is always SA_FIXED_MISSED_WINDOW_MS (2h) from the moment the alert fires.
 // =====================
 async function handleSAMissedWindowFixed(boss, id, channel) {
   const e = data.kills[id];
@@ -1371,7 +1602,6 @@ async function handleSAMissedWindowFixed(boss, id, channel) {
   logBot(`SA MISSED SPAWN ${boss.name} — no kill logged (miss #${count}) — was due: ${toServerDateTimeStr(e.respawnTime)}`);
 
   const nextWindowStart = e.respawnTime;
-  // Always give a full 2h window from NOW so users always see a meaningful countdown
   const nextWindowEnd   = now + SA_FIXED_MISSED_WINDOW_MS;
   if (!missedWindowMessages[id]) {
     missedWindowMessages[id] = {
@@ -1392,7 +1622,6 @@ async function handleSAMissedWindowFixed(boss, id, channel) {
 
 // =====================
 // MISSED WINDOW — World Bosses
-// Window is always missedWindowMs from the moment the alert fires.
 // =====================
 async function handleWBMissedWindow(boss, id, channel) {
   const e = data.kills[id];
@@ -1420,7 +1649,6 @@ async function handleWBMissedWindow(boss, id, channel) {
   clearWBBossCards(id, false);
 
   const nextWindowStart = e.respawnTime;
-  // Always give a full missedWindowMs from NOW so the countdown is meaningful
   const nextWindowEnd   = now + config.missedWindowMs;
   missedWindowMessages[id] = {
     msg: null, deleteTimer: null,
@@ -1452,7 +1680,6 @@ function startLoop() {
       if (!channel) return;
       const now = Date.now();
 
-      // ── Periodic repin ──────────────────────────────────────────────────
       if (now - lastRepinTime >= REPIN_INTERVAL_MS) {
         console.log("[Loop] Periodic repin triggered.");
         if (!repinInProgress) await repinDashboard(channel);
@@ -1461,7 +1688,6 @@ function startLoop() {
         return;
       }
 
-      // ── No dashboard yet ────────────────────────────────────────────────
       if (!dashboardMessage) {
         if (!repinInProgress) repinDashboard(channel);
         checkSAWarnings(channel);
@@ -1469,7 +1695,6 @@ function startLoop() {
         return;
       }
 
-      // ── Normal tick: edit dashboard in place ────────────────────────────
       try {
         await dashboardMessage.edit({ embeds: [buildShadowEmbed()], components: buildShadowButtons() });
       } catch (err) {
@@ -1486,7 +1711,6 @@ function startLoop() {
         return;
       }
 
-      // ── Edit active spawn-window cards ───────────────────────────────────
       for (const [id, w] of Object.entries(spawnWindowMessages)) {
         if (!w.msg) continue;
         const isWorld = !!w.isWorld;
@@ -1498,7 +1722,6 @@ function startLoop() {
         } catch (err) { if (err.code === 10008) delete spawnWindowMessages[id]; }
       }
 
-      // ── Edit active missed-window cards ──────────────────────────────────
       for (const [id, w] of Object.entries(missedWindowMessages)) {
         if (!w.msg) continue;
         const isWorld  = !!w.isWorld;
@@ -2574,6 +2797,17 @@ client.on(Events.InteractionCreate, async interaction => {
     }
     await maybeRepinAfterAction(interaction.channel);
     return interaction.deferUpdate();
+  }
+
+  // ── TOGGLE FULL/COMPACT DASHBOARD ──
+  if (interaction.isButton() && interaction.customId === "toggle_full_dashboard") {
+    showFullDashboard = !showFullDashboard;
+    log(interaction.user, `DASHBOARD VIEW: ${showFullDashboard ? "Full" : "Compact"}`);
+    await interaction.deferUpdate();
+    if (dashboardMessage) {
+      await dashboardMessage.edit({ embeds: [buildShadowEmbed()], components: buildShadowButtons() }).catch(() => {});
+    }
+    return;
   }
 
   // ── SA: UNDO ──
