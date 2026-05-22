@@ -29,8 +29,8 @@ const {
 const fs = require("fs");
 
 const TOKEN          = process.env.SA_BOT_TOKEN;
-const CHANNEL_ID     = "1500795202028310638";
-const LOG_CHANNEL_ID = "1256746466240630934";
+const CHANNEL_ID     = "1507303173239472199";
+const LOG_CHANNEL_ID = "1507303243812704406";
 
 if (!TOKEN) {
   console.error("ERROR: Missing SA_BOT_TOKEN environment variable.");
