@@ -1039,14 +1039,8 @@ function wbHasActiveSlotForServer(server) {
 
 // =====================
 // DUPLICATE-KILL GUARD
-// When a kill is registered for a boss ID, we always overwrite the previous
-// entry (last writer wins). For grouped display we deduplicate by ID so the
-// same boss never appears twice in a list even if it somehow has two entries.
 // =====================
 function deduplicateKillsById(bossList) {
-  // Returns a Set of IDs that have the latest killTime among any boss sharing
-  // the same key+server group.  For single-instance bosses this is a no-op.
-  // For multi-instance bosses we keep all instances but mark the freshest one.
   const seen = new Set();
   const grouped = {};
   for (const b of bossList) {
@@ -1055,9 +1049,6 @@ function deduplicateKillsById(bossList) {
     grouped[groupKey].push(b);
   }
   for (const group of Object.values(grouped)) {
-    // For each group, if multiple entries exist with kills, keep all — they are
-    // distinct instances tracked independently.  The data layer already prevents
-    // the same id from having two entries (object key overwrite).
     for (const b of group) seen.add(b.id);
   }
   return seen;
@@ -1172,10 +1163,6 @@ function buildShadowEmbed(full = showFullDashboard) {
 
 // =====================
 // RESPAWN SCHEDULE EMBED
-// Sorted: furthest respawn at top, soonest at bottom.
-// Shows normal windows and missed windows with full details.
-// Only the latest entry per boss ID is shown (last-write-wins is already
-// enforced at data layer, but we guard here too for safety).
 // =====================
 function buildRespawnEmbed() {
   const now     = Date.now();
@@ -1196,7 +1183,6 @@ function buildRespawnEmbed() {
     const isMissed   = !!missedWindowMessages[b.id];
     const advCount   = missedCount[b.id] || 0;
 
-    // Skip if window fully expired with no missed tracking
     if (cooldown < -10 * 60 * 1000 && !isMissed) continue;
 
     const tsRespawn = Math.floor(e.respawnTime / 1000);
@@ -1327,11 +1313,11 @@ function buildShadowButtons() {
     rows.push(row);
   }
 
+  // ── Bottom control row: Logs button removed, Respawn button kept ──
   rows.push(new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId("sa_insert_time").setLabel("📝 Insert").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId("sa_reset").setLabel("🧹 Reset").setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId("sa_undo").setLabel("↩️ Undo").setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId("show_logs").setLabel("📜 Logs").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId("show_respawn").setLabel("📅 Respawn").setStyle(ButtonStyle.Secondary)
   ));
 
@@ -1867,11 +1853,6 @@ client.on(Events.InteractionCreate, async interaction => {
     repostBackupToBottom();
   }
 
-  // ── LOGS ──
-  if (interaction.isButton() && interaction.customId === "show_logs") {
-    return interaction.reply({ embeds: [buildLogEmbed()], flags: MessageFlags.Ephemeral });
-  }
-
   // ── RESPAWN SCHEDULE ──
   if (interaction.isButton() && interaction.customId === "show_respawn") {
     return interaction.reply({ embeds: [buildRespawnEmbed()], flags: MessageFlags.Ephemeral });
@@ -1972,7 +1953,6 @@ client.on(Events.InteractionCreate, async interaction => {
     else { const [h, m] = raw.split(":").map(Number); killTime = parseServerTime(h, m).getTime(); }
     const respawnMs   = SA_RESPAWN_H[boss.type] * 60 * 60 * 1000;
     const respawnTime = killTime + respawnMs;
-    // Last writer wins — always overwrite any previous entry for this boss ID
     data.kills[id] = { killTime, respawnTime, lastKiller: interaction.user.username };
     save();
     log(interaction.user, `SA KILL ${boss.name} — kill: ${toServerDateTimeStr(killTime)} — respawn: ${toServerDateTimeStr(respawnTime)}`);
@@ -2176,7 +2156,6 @@ client.on(Events.InteractionCreate, async interaction => {
     else { const [h, m] = raw.split(":").map(Number); killTime = parseServerTime(h, m).getTime(); }
     const config      = getWorldBossConfig(id);
     const respawnTime = killTime + config.respawnMs;
-    // Last writer wins — always overwrite
     data.kills[id] = { killTime, respawnTime, lastKiller: interaction.user.username };
     save();
     log(interaction.user, `WB KILL ${boss.name} — kill: ${toServerDateTimeStr(killTime)} — respawn: ${toServerDateTimeStr(respawnTime)}`);
