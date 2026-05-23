@@ -1313,7 +1313,7 @@ function buildShadowButtons() {
     rows.push(row);
   }
 
- // Last row: controls + toggle (merged into one row, max 5 buttons)
+  // ✅ Single controls row — toggle button included here, NOT duplicated below
   rows.push(new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId("sa_insert_time").setLabel("📝 Insert").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId("sa_reset").setLabel("🧹 Reset").setStyle(ButtonStyle.Danger),
@@ -1325,17 +1325,10 @@ function buildShadowButtons() {
       .setStyle(showFullDashboard ? ButtonStyle.Primary : ButtonStyle.Secondary)
   ));
 
-
-  rows.push(new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("toggle_full_dashboard")
-      .setLabel(showFullDashboard ? "🔼 Compact" : "🔍 Show All")
-      .setStyle(showFullDashboard ? ButtonStyle.Primary : ButtonStyle.Secondary)
-  ));
+  // ❌ REMOVED: the duplicate toggle row that was here
 
   return rows;
 }
-
 // =====================
 // REPIN DASHBOARD
 // =====================
