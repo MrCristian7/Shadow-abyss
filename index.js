@@ -313,6 +313,7 @@ function save() {
 // =====================
 function restoreSpawnWarningFlags() {
   const now = Date.now();
+  let freedCount = 0;
 
   for (const b of SHADOW_BOSSES) {
     const e = data.kills[b.id];
@@ -324,41 +325,19 @@ function restoreSpawnWarningFlags() {
     const isGoblin      = b.type === "goblin";
     const windowEnd     = isGoblin ? e.respawnTime + SA_GOBLIN_WINDOW_MS : e.respawnTime;
     const windowExpired = now > windowEnd;
+    if (windowExpired) {
+      console.log(`[Startup] ${b.name} — window already expired. Last kill: ${toServerDateTimeStr(e.killTime)}, next kill timer was: ${toServerDateTimeStr(e.respawnTime)} — freeing slot`);
+      delete data.kills[b.id];
+      spawnWarnings[b.id] = { warned5: false, warned20: false, windowCreated: false, missedHandled: false };
+      freedCount++;
+      continue;
+    }
     spawnWarnings[b.id] = {
       warned5:       cooldown <= 5 * 60 * 1000,
       warned20:      isGoblin && cooldown <= 0 && (windowEnd - now) <= 20 * 60 * 1000,
       windowCreated: isGoblin && cooldown <= 0,
-      missedHandled: windowExpired,
+      missedHandled: false,
     };
-    if (isGoblin && windowExpired) {
-      const advanceCount = missedCount[b.id] || 0;
-      if (advanceCount < SA_MAX_AUTO_ADVANCE) {
-        const nextWindowStart = e.respawnTime;
-        const nextWindowEnd   = now + (SA_GOBLIN_WINDOW_MS + 60 * 60 * 1000);
-        const untilEnd        = nextWindowEnd - now;
-        if (untilEnd + WINDOW_GRACE_MS > 0) {
-          missedWindowMessages[b.id] = {
-            msg: null, deleteTimer: null, nextWindowStart, nextWindowEnd, boss: b,
-            pingedStart: nextWindowStart <= now, pinged1h: untilEnd <= 60 * 60 * 1000,
-            pinged20min: untilEnd <= 20 * 60 * 1000, isShadow: true,
-          };
-          console.log(`[Startup] Restored SA missed window state for ${b.name}`);
-        }
-      }
-    }
-    if (!isGoblin && windowExpired) {
-      const nextWindowStart = e.respawnTime;
-      const nextWindowEnd   = now + SA_FIXED_MISSED_WINDOW_MS;
-      const untilEnd        = nextWindowEnd - now;
-      if (untilEnd + WINDOW_GRACE_MS > 0) {
-        missedWindowMessages[b.id] = {
-          msg: null, deleteTimer: null, nextWindowStart, nextWindowEnd, boss: b,
-          pingedStart: nextWindowStart <= now, pinged1h: false,
-          pinged20min: untilEnd <= 20 * 60 * 1000, isShadow: true,
-        };
-        console.log(`[Startup] Restored SA fixed missed window state for ${b.name}`);
-      }
-    }
   }
 
   for (const b of WORLD_BOSSES) {
@@ -371,31 +350,23 @@ function restoreSpawnWarningFlags() {
     const cooldown      = e.respawnTime - now;
     const windowEnd     = e.respawnTime + config.windowMs;
     const windowExpired = now > windowEnd;
+    if (windowExpired && config.maxMissed > 0) {
+      console.log(`[Startup] ${b.name} — window already expired. Last kill: ${toServerDateTimeStr(e.killTime)}, next kill timer was: ${toServerDateTimeStr(e.respawnTime)} — freeing slot`);
+      delete data.kills[b.id];
+      spawnWarnings[b.id] = { warned5: false, warned20: false, windowCreated: false, missedHandled: false };
+      freedCount++;
+      continue;
+    }
     spawnWarnings[b.id] = {
       warned5:       cooldown <= 5 * 60 * 1000,
       warned20:      cooldown <= 0 && (windowEnd - now) <= 20 * 60 * 1000,
       windowCreated: cooldown <= 0,
       missedHandled: windowExpired,
     };
-    if (windowExpired && config.maxMissed > 0) {
-      const advanceCount = missedCount[b.id] || 0;
-      if (advanceCount < config.maxMissed) {
-        const nextWindowStart = e.respawnTime;
-        const nextWindowEnd   = now + config.missedWindowMs;
-        const untilEnd        = nextWindowEnd - now;
-        if (untilEnd + WINDOW_GRACE_MS > 0) {
-          missedWindowMessages[b.id] = {
-            msg: null, deleteTimer: null, nextWindowStart, nextWindowEnd, boss: b,
-            pingedStart: nextWindowStart <= now, pinged1h: untilEnd <= 60 * 60 * 1000,
-            pinged20min: untilEnd <= 20 * 60 * 1000, isWorld: true,
-          };
-          console.log(`[Startup] Restored world boss missed window state for ${b.name}`);
-        }
-      }
-    }
   }
 
-  console.log("[Startup] Spawn warning flags restored.");
+  if (freedCount > 0) save();
+  console.log(`[Startup] Spawn warning flags restored. ${freedCount} expired slot(s) freed.`);
 }
 
 // =====================
@@ -1429,128 +1400,53 @@ async function createWBSpawnWindow(boss, id, channel, windowEnd) {
 }
 
 // =====================
-// MISSED WINDOW / AUTO-ADVANCE — Shadow Abyss goblin-type
+// MISSED WINDOW — Shadow Abyss goblin-type (log only, free slot)
 // =====================
 async function handleSAMissedWindowGoblin(boss, id, channel) {
   const e = data.kills[id];
   if (!e) return;
-  const count = (missedCount[id] || 0) + 1;
-  missedCount[id] = count;
-  if (count > SA_MAX_AUTO_ADVANCE) {
-    console.log(`[SA MissedWindow] ${boss.name} already at max advances (${SA_MAX_AUTO_ADVANCE}), skipping.`);
-    return;
-  }
-  console.log(`[SA MissedWindow] No kill for ${boss.name} — auto-advancing ${SA_RESPAWN_H.goblin}h (advance #${count})`);
-  snapshot();
-  const respawnMs = SA_RESPAWN_H.goblin * 60 * 60 * 1000;
-  e.killTime    = e.respawnTime;
-  e.respawnTime = e.respawnTime + respawnMs;
+  const lastKill    = toServerDateTimeStr(e.killTime);
+  const nextRespawn = toServerDateTimeStr(e.respawnTime);
+  console.log(`[SA MissedWindow] ${boss.name} — window missed. Last kill: ${lastKill}, next kill timer was: ${nextRespawn}`);
+  logBot(`SA MISSED WINDOW ${boss.name} — last kill: ${lastKill} — next kill timer: ${nextRespawn} — slot freed`);
+  clearSABossCards(id);
+  delete data.kills[id];
   save();
-  logBot(`SA AUTO-ADVANCE ${boss.name} — missed window #${count}/${SA_MAX_AUTO_ADVANCE} — new respawn: ${toServerDateTimeStr(e.respawnTime)}${count >= SA_MAX_AUTO_ADVANCE ? " — 🔒 LOCKED" : ""}`);
   spawnWarnings[id] = { warned5: false, warned20: false, windowCreated: false, missedHandled: false };
-  clearSABossCards(id, false);
-  const now             = Date.now();
-  const nextWindowStart = e.respawnTime;
-  const nextWindowEnd   = now + (SA_GOBLIN_WINDOW_MS + 60 * 60 * 1000);
-  missedWindowMessages[id] = {
-    msg: null, deleteTimer: null, nextWindowStart, nextWindowEnd,
-    pingedStart: false, pinged1h: false, pinged20min: false, boss, isShadow: true,
-  };
-  const tsOpen  = Math.floor(nextWindowStart / 1000);
-  const tsClose = Math.floor(nextWindowEnd   / 1000);
-  if (count >= SA_MAX_AUTO_ADVANCE) {
-    postEveryoneWarning(channel, `${id}_sa_locked`,
-      `@everyone 🔒 **[Shadow Abyss] ${boss.name}** has missed its spawn window **${count}/${SA_MAX_AUTO_ADVANCE} times** — TIMER LOCKED!\n` +
-      `⚠️ Please find the goblin and manually update the timer.\n` +
-      `📍 Last estimated window: ${toServerTimeStr(nextWindowStart)} – ${toServerTimeStr(nextWindowEnd)} (server)\n` +
-      `<t:${tsOpen}:t> — <t:${tsClose}:t> (your time)`,
-      30 * 60 * 1000);
-  } else {
-    postEveryoneWarning(channel, `${id}_sa_stale_${count}`,
-      `@everyone ⚠️ **[Shadow Abyss] ${boss.name}** missed window #${count}/${SA_MAX_AUTO_ADVANCE}.\n` +
-      `📍 Next estimated window: ${toServerTimeStr(nextWindowStart)} – ${toServerTimeStr(nextWindowEnd)} (server)\n` +
-      `<t:${tsOpen}:t> — <t:${tsClose}:t> (your time)`,
-      30 * 60 * 1000);
-  }
 }
 
 // =====================
-// MISSED WINDOW — Shadow Abyss fixed-respawn types
+// MISSED WINDOW — Shadow Abyss fixed-respawn types (log only, free slot)
 // =====================
 async function handleSAMissedWindowFixed(boss, id, channel) {
   const e = data.kills[id];
   if (!e) return;
-  const count = (missedCount[id] || 0) + 1;
-  missedCount[id] = count;
-  const now = Date.now();
-  console.log(`[SA MissedWindow Fixed] ${boss.name} — missed #${count}`);
-  logBot(`SA MISSED SPAWN ${boss.name} — no kill logged (miss #${count}) — was due: ${toServerDateTimeStr(e.respawnTime)}`);
-  const nextWindowStart = e.respawnTime;
-  const nextWindowEnd   = now + SA_FIXED_MISSED_WINDOW_MS;
-  if (!missedWindowMessages[id]) {
-    missedWindowMessages[id] = {
-      msg: null, deleteTimer: null, nextWindowStart, nextWindowEnd,
-      pingedStart: true, pinged1h: false, pinged20min: false, boss, isShadow: true,
-    };
-  } else {
-    missedWindowMessages[id].nextWindowEnd = nextWindowEnd;
-  }
-  const tsRespawn = Math.floor(e.respawnTime / 1000);
-  postEveryoneWarning(channel, `${id}_sa_fixed_missed_${count}`,
-    `@everyone 🚨 **[Shadow Abyss] ${boss.name}** spawned but no kill was logged!\n` +
-    `🕒 Was due: ${toServerTimeStr(e.respawnTime)} (server) — <t:${tsRespawn}:t>\n` +
-    `Please log the kill using the ⏱️ Set Time button.`,
-    20 * 60 * 1000);
+  const lastKill    = toServerDateTimeStr(e.killTime);
+  const nextRespawn = toServerDateTimeStr(e.respawnTime);
+  console.log(`[SA MissedWindow Fixed] ${boss.name} — window missed. Last kill: ${lastKill}, next kill timer was: ${nextRespawn}`);
+  logBot(`SA MISSED WINDOW ${boss.name} — last kill: ${lastKill} — next kill timer: ${nextRespawn} — slot freed`);
+  clearSABossCards(id);
+  delete data.kills[id];
+  save();
+  spawnWarnings[id] = { warned5: false, warned20: false, windowCreated: false, missedHandled: false };
 }
 
 // =====================
-// MISSED WINDOW — World Bosses
+// MISSED WINDOW — World Bosses (log only, free slot)
 // =====================
 async function handleWBMissedWindow(boss, id, channel) {
   const e = data.kills[id];
   if (!e) return;
   const config = getWorldBossConfig(id);
-
   if (config.maxMissed === 0) return;
-
-  missedCount[id] = (missedCount[id] || 0) + 1;
-  const count = missedCount[id];
-  const now   = Date.now();
-
-  if (count > config.maxMissed) {
-    console.log(`[WB MissedWindow] ${boss.name} exceeded max missed (${config.maxMissed}), stopping.`);
-    const content = `@everyone 🚨 **[World Boss] ${boss.name}** timer is **stale** (${count} misses, max ${config.maxMissed}). Please find and kill the boss, then update the timer manually.`;
-    postEveryoneWarning(channel, `${id}_wb_stale_timer`, content, 30 * 60 * 1000, boss.key);
-    return;
-  }
-
-  const advanceHours = config.respawnMs / HOUR;
-  console.log(`[WB MissedWindow] No kill for ${boss.name} — auto-advancing ${advanceHours}h (advance #${count})`);
-  snapshot();
-  e.respawnTime = e.respawnTime + config.respawnMs;
-  e.killTime    = e.respawnTime - config.respawnMs;
+  const lastKill    = toServerDateTimeStr(e.killTime);
+  const nextRespawn = toServerDateTimeStr(e.respawnTime);
+  console.log(`[WB MissedWindow] ${boss.name} — window missed. Last kill: ${lastKill}, next kill timer was: ${nextRespawn}`);
+  logBot(`WB MISSED WINDOW ${boss.name} — last kill: ${lastKill} — next kill timer: ${nextRespawn} — slot freed`);
+  clearWBBossCards(id);
+  delete data.kills[id];
   save();
-  logBot(`WB AUTO-ADVANCE ${boss.name} — missed window #${count}/${config.maxMissed} — new respawn: ${toServerDateTimeStr(e.respawnTime)}`);
   spawnWarnings[id] = { warned5: false, warned20: false, windowCreated: false, missedHandled: false };
-  clearWBBossCards(id, false);
-
-  const nextWindowStart = e.respawnTime;
-  const nextWindowEnd   = now + config.missedWindowMs;
-  missedWindowMessages[id] = {
-    msg: null, deleteTimer: null, nextWindowStart, nextWindowEnd,
-    pingedStart: false, pinged1h: false, pinged20min: false, boss, isWorld: true,
-  };
-
-  if (count >= 2) {
-    const tsOpen  = Math.floor(nextWindowStart / 1000);
-    const tsClose = Math.floor(nextWindowEnd   / 1000);
-    const content =
-      `@everyone 🚨 **[World Boss] ${boss.name}** has missed its spawn window **${count} times** in a row!\n` +
-      `The timer is likely wrong — please find and kill the boss to reset it.\n` +
-      `📍 Next estimated window: ${toServerTimeStr(nextWindowStart)} – ${toServerTimeStr(nextWindowEnd)} (server)\n` +
-      `<t:${tsOpen}:t> — <t:${tsClose}:t> (your time)`;
-    postEveryoneWarning(channel, `${id}_wb_stale_timer`, content, 30 * 60 * 1000, boss.key);
-  }
 }
 
 // =====================
