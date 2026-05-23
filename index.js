@@ -1709,12 +1709,16 @@ function checkSAWarnings(channel) {
       postEveryoneWarning(channel, `${b.id}_20min`, `@everyone ⚠️ **[Shadow Abyss] ${b.name}** goblin window closes in 20 minutes!`);
     }
     if (!isGoblin && cooldown <= 0 && cooldown >= -5 * 60 * 1000 && !w.windowCreated) {
-      w.windowCreated = true;
-      clearEveryoneWarning(`${b.id}_5min`);
-      const tsRespawn = Math.floor(e.respawnTime / 1000);
-      postEveryoneWarning(channel, `${b.id}_spawned`,
-        `@everyone 🌑 **[Shadow Abyss] ${b.name}** has spawned! Log the kill when done.\n<t:${tsRespawn}:t>`,
-        10 * 60 * 1000);
+  w.windowCreated = true;
+  clearEveryoneWarning(`${b.id}_5min`);
+  
+  // Create a persistent window card (same as goblins), not just a ping
+  if (!missedWindowMessages[b.id]) createSASpawnWindow(b, b.id, channel, windowEnd);
+
+  const tsRespawn = Math.floor(e.respawnTime / 1000);
+  postEveryoneWarning(channel, `${b.id}_spawned`,
+    `@everyone 🌑 **[Shadow Abyss] ${b.name}** has spawned! Log the kill when done.\n<t:${tsRespawn}:t>`,
+    10 * 60 * 1000);
     }
     if (timeSinceWindowExpired >= 10 * 60 * 1000 && !w.missedHandled) {
       w.missedHandled = true;
