@@ -2,6 +2,7 @@
 // GLOBAL CRASH HANDLERS
 // =====================
 process.on("uncaughtException", (err) => {
+  if (err?.code === 10062) return; // stale interaction, safe to ignore
   console.error("[UncaughtException]", err.message, err.stack);
 });
 process.on("unhandledRejection", (err) => {
@@ -72,7 +73,6 @@ let repinInProgress      = false;
 let lastBackupRepost     = 0;
 let lastRepinTime        = 0;
 let actionsSinceRepin    = 0;
-let showFullDashboard    = false;
 
 const BACKUP_REPOST_COOLDOWN_MS = 60 * 1000;
 const BOT_START_TIME   = Date.now();
@@ -1028,11 +1028,11 @@ function deduplicateKillsById(bossList) {
 // =====================
 // DASHBOARD EMBED
 // =====================
-function buildShadowEmbed(full = showFullDashboard) {
+function buildShadowEmbed(full = false) {
   const embed = new EmbedBuilder()
     .setTitle(full ? "🌑 SHADOW ABYSS TRACKER — Full View" : "🌑 SHADOW ABYSS TRACKER")
     .setColor(0x7b00ff)
-    .setFooter({ text: `Auto-updates every 15s${full ? " • Full view" : " • Compact view — tap 🔍 to expand"}` });
+    .setFooter({ text: `Auto-updates every 15s${full ? " • Full view" : " • Compact view"}` });
 
   // ── Section 1: Goblins ─────────────────────────────────────────────────
   const goblinKeys    = [...new Set(SHADOW_BOSSES.filter(b => b.type === "goblin").map(b => b.key))];
@@ -1125,7 +1125,7 @@ function buildShadowEmbed(full = showFullDashboard) {
   if (!full) {
     const hasAnyField = embed.data.fields && embed.data.fields.some(f => f.name !== "\u200b");
     if (!hasAnyField) {
-      embed.setDescription("✅ No active timers — all bosses are ready to kill!\n\nTap **🔍 Show All** to see the full list.");
+      embed.setDescription("✅ No active timers — all bosses are ready to kill!");
     }
   }
 
@@ -1284,22 +1284,18 @@ function buildShadowButtons() {
     rows.push(row);
   }
 
-  // ✅ Single controls row — toggle button included here, NOT duplicated below
+  // Controls row — 📊 Dashboard opens the tracker ephemerally for the user
   rows.push(new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId("sa_insert_time").setLabel("📝 Insert").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId("sa_reset").setLabel("🧹 Reset").setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId("sa_undo").setLabel("↩️ Undo").setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId("show_respawn").setLabel("📅 Respawn").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId("toggle_full_dashboard")
-      .setLabel(showFullDashboard ? "🔼 Compact" : "🔍 Show All")
-      .setStyle(showFullDashboard ? ButtonStyle.Primary : ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId("show_dashboard").setLabel("📊 Dashboard").setStyle(ButtonStyle.Secondary)
   ));
-
-  // ❌ REMOVED: the duplicate toggle row that was here
 
   return rows;
 }
+
 // =====================
 // REPIN DASHBOARD
 // =====================
@@ -1314,8 +1310,11 @@ async function repinDashboard(channel) {
       embeds: [buildLogEmbed()], flags: MessageFlags.SuppressNotifications
     }).catch(err => { console.error("[Repin] Failed to re-post log message:", err.message ?? err); return null; });
 
+    // Pinned message is buttons-only — no embed
     const newDashboard = await channel.send({
-      embeds: [buildShadowEmbed()], components: buildShadowButtons(), flags: MessageFlags.SuppressNotifications
+      content: "**🌑 Shadow Abyss — Boss Tracker**",
+      components: buildShadowButtons(),
+      flags: MessageFlags.SuppressNotifications
     }).catch(err => { console.error("[Repin] Failed to post dashboard:", err.message ?? err); return null; });
 
     if (!newDashboard) return;
@@ -1476,8 +1475,9 @@ function startLoop() {
         return;
       }
 
+      // Pinned message only has buttons — just refresh components
       try {
-        await dashboardMessage.edit({ embeds: [buildShadowEmbed()], components: buildShadowButtons() });
+        await dashboardMessage.edit({ components: buildShadowButtons() });
       } catch (err) {
         if (err.code === 10008) {
           console.warn("[Loop] Dashboard deleted — repinning full stack.");
@@ -1605,16 +1605,15 @@ function checkSAWarnings(channel) {
       postEveryoneWarning(channel, `${b.id}_20min`, `@everyone ⚠️ **[Shadow Abyss] ${b.name}** goblin window closes in 20 minutes!`);
     }
     if (!isGoblin && cooldown <= 0 && cooldown >= -5 * 60 * 1000 && !w.windowCreated) {
-  w.windowCreated = true;
-  clearEveryoneWarning(`${b.id}_5min`);
-  
-  // Create a persistent window card (same as goblins), not just a ping
-  if (!missedWindowMessages[b.id]) createSASpawnWindow(b, b.id, channel, windowEnd);
+      w.windowCreated = true;
+      clearEveryoneWarning(`${b.id}_5min`);
 
-  const tsRespawn = Math.floor(e.respawnTime / 1000);
-  postEveryoneWarning(channel, `${b.id}_spawned`,
-    `@everyone 🌑 **[Shadow Abyss] ${b.name}** has spawned! Log the kill when done.\n<t:${tsRespawn}:t>`,
-    10 * 60 * 1000);
+      if (!missedWindowMessages[b.id]) createSASpawnWindow(b, b.id, channel, windowEnd);
+
+      const tsRespawn = Math.floor(e.respawnTime / 1000);
+      postEveryoneWarning(channel, `${b.id}_spawned`,
+        `@everyone 🌑 **[Shadow Abyss] ${b.name}** has spawned! Log the kill when done.\n<t:${tsRespawn}:t>`,
+        10 * 60 * 1000);
     }
     if (timeSinceWindowExpired >= 10 * 60 * 1000 && !w.missedHandled) {
       w.missedHandled = true;
@@ -1728,8 +1727,11 @@ client.once(Events.ClientReady, async () => {
     embeds: [buildLogEmbed()], flags: MessageFlags.SuppressNotifications
   }).catch(err => { console.error("[Ready] Failed to post log message:", err.message ?? err); return null; });
 
+  // Pinned message is buttons-only — no embed
   dashboardMessage = await channel.send({
-    embeds: [buildShadowEmbed()], components: buildShadowButtons(), flags: MessageFlags.SuppressNotifications
+    content: "**🌑 Shadow Abyss — Boss Tracker**",
+    components: buildShadowButtons(),
+    flags: MessageFlags.SuppressNotifications
   });
 
   lastRepinTime     = Date.now();
@@ -1754,6 +1756,11 @@ client.on(Events.InteractionCreate, async interaction => {
   // ── RESPAWN SCHEDULE ──
   if (interaction.isButton() && interaction.customId === "show_respawn") {
     return interaction.reply({ embeds: [buildRespawnEmbed()], flags: MessageFlags.Ephemeral });
+  }
+
+  // ── DASHBOARD — ephemeral per-user view ──
+  if (interaction.isButton() && interaction.customId === "show_dashboard") {
+    return interaction.reply({ embeds: [buildShadowEmbed(true)], flags: MessageFlags.Ephemeral });
   }
 
   // ── SA: KILL TYPE BUTTON — pick server ──
@@ -2452,11 +2459,6 @@ client.on(Events.InteractionCreate, async interaction => {
     }
     await maybeRepinAfterAction(interaction.channel);
     return interaction.deferUpdate();
-  }
-
-  // ── SHOW FULL DASHBOARD — ephemeral ──
-  if (interaction.isButton() && interaction.customId === "toggle_full_dashboard") {
-    return interaction.reply({ embeds: [buildShadowEmbed(true)], flags: MessageFlags.Ephemeral });
   }
 
   // ── SA: UNDO ──
