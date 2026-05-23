@@ -377,7 +377,6 @@ function restoreSpawnWarningFlags() {
       windowCreated: cooldown <= 0,
       missedHandled: windowExpired,
     };
-    // Only restore missed window for bosses that support it
     if (windowExpired && config.maxMissed > 0) {
       const advanceCount = missedCount[b.id] || 0;
       if (advanceCount < config.maxMissed) {
@@ -873,6 +872,10 @@ function buildWBMissedWindowComponents(id) {
 
 // =====================
 // DASHBOARD HELPERS — slot renderers
+// ⏳ = on cooldown (was 🔴)
+// 🟢 = window open / ready
+// 🟡 = just spawned
+// ⚠️ = missed
 // =====================
 
 function renderGoblinSlot(b) {
@@ -895,8 +898,8 @@ function renderGoblinSlot(b) {
   const windowLeft = windowEnd - now;
 
   if (cooldown > 0) {
-    if (isMissed) return { text: `#${b.index} ⚠️ ${format(cooldown)} → ${localTime} x${advCount}${locked ? "🔒" : ""} ${killerTag}`, isMissed: true, isReady: false };
-    return { text: `#${b.index} 🔴 ${format(cooldown)} → ${localTime} ${killerTag}`, isMissed: false, isReady: false };
+    if (isMissed) return { text: `#${b.index} ⚠️ ⏳${format(cooldown)} → ${localTime} x${advCount}${locked ? "🔒" : ""} ${killerTag}`, isMissed: true, isReady: false };
+    return { text: `#${b.index} ⏳ ${format(cooldown)} → ${localTime} ${killerTag}`, isMissed: false, isReady: false };
   }
   if (windowLeft > 0) return { text: `#${b.index} 🟢 ${format(windowLeft)} left ${killerTag}`, isMissed: false, isReady: false };
   if (locked) return { text: `#${b.index} 🔒 x${advCount} ${killerTag}`, isMissed: true, isReady: false };
@@ -920,8 +923,8 @@ function renderSAFixedSlot(b) {
   const cooldown  = e.respawnTime - now;
 
   if (cooldown > 0) {
-    if (isMissed) return { text: `#${b.index} ⚠️ ${format(cooldown)} → ${localTime} x${advCount} ${killerTag}`, isMissed: true, isReady: false };
-    return { text: `#${b.index} 🔴 ${format(cooldown)} → ${localTime} ${killerTag}`, isMissed: false, isReady: false };
+    if (isMissed) return { text: `#${b.index} ⚠️ ⏳${format(cooldown)} → ${localTime} x${advCount} ${killerTag}`, isMissed: true, isReady: false };
+    return { text: `#${b.index} ⏳ ${format(cooldown)} → ${localTime} ${killerTag}`, isMissed: false, isReady: false };
   }
   if (cooldown >= -5 * 60 * 1000) return { text: `#${b.index} 🟡 SPAWNED ${killerTag}`, isMissed: false, isReady: false };
   return { text: `#${b.index} ⚠️ x${advCount} ${killerTag}`, isMissed: true, isReady: false };
@@ -947,11 +950,10 @@ function renderWBMultiSlot(b) {
   const windowLeft = windowEnd - now;
 
   if (cooldown > 0) {
-    if (isMissed) return { text: `#${b.index} ⚠️ ${format(cooldown)} → ${localTime} x${advCount} ${killerTag}`, isMissed: true, isReady: false };
-    return { text: `#${b.index} 🔴 ${format(cooldown)} → ${localTime} ${killerTag}`, isMissed: false, isReady: false };
+    if (isMissed) return { text: `#${b.index} ⚠️ ⏳${format(cooldown)} → ${localTime} x${advCount} ${killerTag}`, isMissed: true, isReady: false };
+    return { text: `#${b.index} ⏳ ${format(cooldown)} → ${localTime} ${killerTag}`, isMissed: false, isReady: false };
   }
   if (windowLeft > 0) return { text: `#${b.index} 🟢 WIN ${format(windowLeft)} ${killerTag}`, isMissed: false, isReady: false };
-  // Window expired — if no missed tracking, go back to ready
   if (cfg.maxMissed === 0) return { text: `#${b.index} 🟢`, isMissed: false, isReady: true };
   if (advCount >= cfg.maxMissed) return { text: `#${b.index} 🚨 x${advCount} ${killerTag}`, isMissed: true, isReady: false };
   return { text: `#${b.index} ⚠️ x${advCount} ${killerTag}`, isMissed: true, isReady: false };
@@ -972,8 +974,8 @@ function renderSAFixedSingle(id) {
   const cooldown  = e.respawnTime - now;
 
   if (cooldown > 0) {
-    if (isMissed) return { text: `⚠️ ${format(cooldown)} → ${localTime} x${advCount} ${killerTag}`, isReady: false };
-    return { text: `🔴 ${format(cooldown)} → ${localTime} ${killerTag}`, isReady: false };
+    if (isMissed) return { text: `⚠️ ⏳${format(cooldown)} → ${localTime} x${advCount} ${killerTag}`, isReady: false };
+    return { text: `⏳ ${format(cooldown)} → ${localTime} ${killerTag}`, isReady: false };
   }
   if (cooldown >= -5 * 60 * 1000) return { text: `🟡 SPAWNED ${killerTag}`, isReady: false };
   return { text: `⚠️ x${advCount} (last kill ${toServerTimeStr(e.killTime)}) ${killerTag}`, isReady: false };
@@ -997,11 +999,10 @@ function renderWBSingle(id) {
   const windowLeft = windowEnd - now;
 
   if (cooldown > 0) {
-    if (isMissed) return { text: `⚠️ ${format(cooldown)} → ${localTime} x${advCount} ${killerTag}`, isReady: false };
-    return { text: `🔴 ${format(cooldown)} → ${localTime} ${killerTag}`, isReady: false };
+    if (isMissed) return { text: `⚠️ ⏳${format(cooldown)} → ${localTime} x${advCount} ${killerTag}`, isReady: false };
+    return { text: `⏳ ${format(cooldown)} → ${localTime} ${killerTag}`, isReady: false };
   }
   if (windowLeft > 0) return { text: `🟢 WIN ${format(windowLeft)} ${killerTag}`, isReady: false };
-  // Window expired — if no missed tracking, go back to ready
   if (cfg.maxMissed === 0) return { text: "🟢", isReady: true };
   if (advCount >= cfg.maxMissed) return { text: `🚨 x${advCount} (last kill ${toServerTimeStr(e.killTime)}) ${killerTag}`, isReady: false };
   return { text: `⚠️ x${advCount} (last kill ${toServerTimeStr(e.killTime)}) ${killerTag}`, isReady: false };
@@ -1034,6 +1035,32 @@ function wbHasActiveSlotForServer(server) {
     if (isMultiInstanceWB(key)) return getWBInstances(key, server).some(b => !renderWBMultiSlot(b).isReady);
     return !renderWBSingle(`wb_${key}_s${server}`).isReady;
   });
+}
+
+// =====================
+// DUPLICATE-KILL GUARD
+// When a kill is registered for a boss ID, we always overwrite the previous
+// entry (last writer wins). For grouped display we deduplicate by ID so the
+// same boss never appears twice in a list even if it somehow has two entries.
+// =====================
+function deduplicateKillsById(bossList) {
+  // Returns a Set of IDs that have the latest killTime among any boss sharing
+  // the same key+server group.  For single-instance bosses this is a no-op.
+  // For multi-instance bosses we keep all instances but mark the freshest one.
+  const seen = new Set();
+  const grouped = {};
+  for (const b of bossList) {
+    const groupKey = `${b.key}_s${b.server}`;
+    if (!grouped[groupKey]) grouped[groupKey] = [];
+    grouped[groupKey].push(b);
+  }
+  for (const group of Object.values(grouped)) {
+    // For each group, if multiple entries exist with kills, keep all — they are
+    // distinct instances tracked independently.  The data layer already prevents
+    // the same id from having two entries (object key overwrite).
+    for (const b of group) seen.add(b.id);
+  }
+  return seen;
 }
 
 // =====================
@@ -1144,6 +1171,127 @@ function buildShadowEmbed(full = showFullDashboard) {
 }
 
 // =====================
+// RESPAWN SCHEDULE EMBED
+// Sorted: furthest respawn at top, soonest at bottom.
+// Shows normal windows and missed windows with full details.
+// Only the latest entry per boss ID is shown (last-write-wins is already
+// enforced at data layer, but we guard here too for safety).
+// =====================
+function buildRespawnEmbed() {
+  const now     = Date.now();
+  const entries = [];
+  const seenIds = new Set();
+
+  // ── Shadow Abyss bosses ──
+  for (const b of SHADOW_BOSSES) {
+    if (seenIds.has(b.id)) continue;
+    const e = data.kills[b.id];
+    if (!e) continue;
+    seenIds.add(b.id);
+
+    const isGoblin   = b.type === "goblin";
+    const cooldown   = e.respawnTime - now;
+    const windowEnd  = isGoblin ? e.respawnTime + SA_GOBLIN_WINDOW_MS : e.respawnTime + 5 * 60 * 1000;
+    const windowLeft = windowEnd - now;
+    const isMissed   = !!missedWindowMessages[b.id];
+    const advCount   = missedCount[b.id] || 0;
+
+    // Skip if window fully expired with no missed tracking
+    if (cooldown < -10 * 60 * 1000 && !isMissed) continue;
+
+    const tsRespawn = Math.floor(e.respawnTime / 1000);
+    let statusLine;
+    let sortTime;
+
+    if (isMissed) {
+      const mw     = missedWindowMessages[b.id];
+      const mwTs   = Math.floor((mw?.nextWindowStart ?? e.respawnTime) / 1000);
+      const mwEnd  = mw?.nextWindowEnd ?? e.respawnTime;
+      const locked = advCount >= SA_MAX_AUTO_ADVANCE;
+      statusLine = `⚠️ **MISSED x${advCount}${locked ? " 🔒" : ""}** — window <t:${mwTs}:t> → ${toServerTimeStr(mwEnd)} (server)\n  ${locked ? "🔒 Timer locked — update manually" : `Estimated next: <t:${mwTs}:R>`}`;
+      sortTime = mw?.nextWindowStart ?? e.respawnTime;
+    } else if (cooldown > 0) {
+      statusLine = `⏳ Spawns <t:${tsRespawn}:R> — <t:${tsRespawn}:t> (${toServerTimeStr(e.respawnTime)} server)`;
+      sortTime = e.respawnTime;
+    } else if (isGoblin && windowLeft > 0) {
+      statusLine = `🟢 **WINDOW OPEN** — closes in **${formatSeconds(windowLeft)}** (<t:${Math.floor(windowEnd / 1000)}:t>)`;
+      sortTime = windowEnd;
+    } else if (!isGoblin && cooldown >= -5 * 60 * 1000) {
+      statusLine = `🟡 **SPAWNED** — log the kill! (spawned <t:${tsRespawn}:R>)`;
+      sortTime = e.respawnTime;
+    } else {
+      continue;
+    }
+
+    entries.push({
+      sortTime,
+      isMissed,
+      cooldown,
+      line: `**[SA] ${b.name}** *(${e.lastKiller})*\n  ${statusLine}`
+    });
+  }
+
+  // ── World Bosses ──
+  for (const b of WORLD_BOSSES) {
+    if (seenIds.has(b.id)) continue;
+    const e = data.kills[b.id];
+    if (!e) continue;
+    seenIds.add(b.id);
+
+    const config     = getWorldBossConfig(b.id);
+    const cooldown   = e.respawnTime - now;
+    const windowEnd  = e.respawnTime + config.windowMs;
+    const windowLeft = windowEnd - now;
+    const isMissed   = !!missedWindowMessages[b.id];
+    const advCount   = missedCount[b.id] || 0;
+
+    if (cooldown < -10 * 60 * 1000 && !isMissed) continue;
+
+    const tsRespawn = Math.floor(e.respawnTime / 1000);
+    let statusLine;
+    let sortTime;
+
+    if (isMissed) {
+      const mw   = missedWindowMessages[b.id];
+      const mwTs = Math.floor((mw?.nextWindowStart ?? e.respawnTime) / 1000);
+      statusLine = `⚠️ **MISSED x${advCount}** — estimated window <t:${mwTs}:t>\n  ⚠️ Timer may be wrong — find and kill the boss`;
+      sortTime = mw?.nextWindowStart ?? e.respawnTime;
+    } else if (cooldown > 0) {
+      statusLine = `⏳ Spawns <t:${tsRespawn}:R> — <t:${tsRespawn}:t> (${toServerTimeStr(e.respawnTime)} server)`;
+      sortTime = e.respawnTime;
+    } else if (windowLeft > 0) {
+      statusLine = `🟢 **WINDOW OPEN** — closes in **${formatSeconds(windowLeft)}** (<t:${Math.floor(windowEnd / 1000)}:t>)`;
+      sortTime = windowEnd;
+    } else {
+      continue;
+    }
+
+    entries.push({
+      sortTime,
+      isMissed,
+      cooldown,
+      line: `**[WB] ${b.name}** *(${e.lastKiller})*\n  ${statusLine}`
+    });
+  }
+
+  // Sort: furthest at top, soonest at bottom
+  entries.sort((a, b) => b.sortTime - a.sortTime);
+
+  const description   = entries.length
+    ? entries.map(e => e.line).join("\n\n")
+    : "✅ No active timers — all bosses are ready!";
+
+  const missedCt    = entries.filter(e => e.isMissed).length;
+  const openWindows = entries.filter(e => !e.isMissed && e.cooldown <= 0).length;
+
+  return new EmbedBuilder()
+    .setTitle("📅 Respawn Schedule — Soonest at bottom")
+    .setColor(0x7b00ff)
+    .setDescription(description)
+    .setFooter({ text: `${entries.length} active timer(s) • ${openWindows} window(s) open • ${missedCt} missed • ${toServerTimeStr(now)} server time` });
+}
+
+// =====================
 // SHADOW ABYSS BUTTONS
 // =====================
 function buildShadowButtons() {
@@ -1184,6 +1332,10 @@ function buildShadowButtons() {
     new ButtonBuilder().setCustomId("sa_reset").setLabel("🧹 Reset").setStyle(ButtonStyle.Danger),
     new ButtonBuilder().setCustomId("sa_undo").setLabel("↩️ Undo").setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId("show_logs").setLabel("📜 Logs").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("show_respawn").setLabel("📅 Respawn").setStyle(ButtonStyle.Secondary)
+  ));
+
+  rows.push(new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId("toggle_full_dashboard")
       .setLabel(showFullDashboard ? "🔼 Compact" : "🔍 Show All")
@@ -1375,7 +1527,6 @@ async function handleWBMissedWindow(boss, id, channel) {
   if (!e) return;
   const config = getWorldBossConfig(id);
 
-  // No missed window tracking for this boss type (e.g. dreadhorn, moltragon)
   if (config.maxMissed === 0) return;
 
   missedCount[id] = (missedCount[id] || 0) + 1;
@@ -1616,7 +1767,6 @@ function checkWBWarnings(channel) {
       clearEveryoneWarning(`${b.id}_5min`);
       if (!missedWindowMessages[b.id]) createWBSpawnWindow(b, b.id, channel, windowEnd);
     }
-    // Only fire 20-min warning for bosses with a window longer than 20 minutes
     if (config.windowMs > 20 * 60 * 1000 && cooldown <= 0 && windowLeft > 0 && windowLeft <= 20 * 60 * 1000 && !w.warned20) {
       w.warned20 = true;
       postEveryoneWarning(channel, `${b.id}_20min`,
@@ -1722,6 +1872,11 @@ client.on(Events.InteractionCreate, async interaction => {
     return interaction.reply({ embeds: [buildLogEmbed()], flags: MessageFlags.Ephemeral });
   }
 
+  // ── RESPAWN SCHEDULE ──
+  if (interaction.isButton() && interaction.customId === "show_respawn") {
+    return interaction.reply({ embeds: [buildRespawnEmbed()], flags: MessageFlags.Ephemeral });
+  }
+
   // ── SA: KILL TYPE BUTTON — pick server ──
   if (interaction.isButton() && interaction.customId.startsWith("sa_kill_type_")) {
     const key   = interaction.customId.replace("sa_kill_type_", "");
@@ -1774,7 +1929,7 @@ client.on(Events.InteractionCreate, async interaction => {
         .addOptions(instances.map(b => {
           const e = data.kills[b.id];
           let status = "🟢 READY";
-          if (e) { const cd = e.respawnTime - now; status = cd > 0 ? `🔴 ${format(cd)}` : `🟡 SPAWNED`; }
+          if (e) { const cd = e.respawnTime - now; status = cd > 0 ? `⏳ ${format(cd)}` : `🟡 SPAWNED`; }
           return { label: `#${b.index} — ${status}`, value: b.id };
         }));
       return interaction.reply({
@@ -1817,6 +1972,7 @@ client.on(Events.InteractionCreate, async interaction => {
     else { const [h, m] = raw.split(":").map(Number); killTime = parseServerTime(h, m).getTime(); }
     const respawnMs   = SA_RESPAWN_H[boss.type] * 60 * 60 * 1000;
     const respawnTime = killTime + respawnMs;
+    // Last writer wins — always overwrite any previous entry for this boss ID
     data.kills[id] = { killTime, respawnTime, lastKiller: interaction.user.username };
     save();
     log(interaction.user, `SA KILL ${boss.name} — kill: ${toServerDateTimeStr(killTime)} — respawn: ${toServerDateTimeStr(respawnTime)}`);
@@ -1974,7 +2130,7 @@ client.on(Events.InteractionCreate, async interaction => {
           if (e) {
             const cd         = e.respawnTime - now;
             const windowLeft = e.respawnTime + cfg.windowMs - now;
-            if (cd > 0) status = `🔴 ${format(cd)}`;
+            if (cd > 0) status = `⏳ ${format(cd)}`;
             else if (windowLeft > 0) status = `🟢 WIN ${format(windowLeft)}`;
             else status = `⚠️ MISSED`;
           }
@@ -2020,6 +2176,7 @@ client.on(Events.InteractionCreate, async interaction => {
     else { const [h, m] = raw.split(":").map(Number); killTime = parseServerTime(h, m).getTime(); }
     const config      = getWorldBossConfig(id);
     const respawnTime = killTime + config.respawnMs;
+    // Last writer wins — always overwrite
     data.kills[id] = { killTime, respawnTime, lastKiller: interaction.user.username };
     save();
     log(interaction.user, `WB KILL ${boss.name} — kill: ${toServerDateTimeStr(killTime)} — respawn: ${toServerDateTimeStr(respawnTime)}`);
@@ -2191,7 +2348,7 @@ client.on(Events.InteractionCreate, async interaction => {
           if (e) {
             const cooldown  = e.respawnTime - now;
             const windowEnd = e.respawnTime + SA_GOBLIN_WINDOW_MS;
-            if (cooldown > 0) statusStr = `🔴 ${format(cooldown)}`;
+            if (cooldown > 0) statusStr = `⏳ ${format(cooldown)}`;
             else if (windowEnd > now) statusStr = `🟢 WINDOW ${format(windowEnd - now)}`;
             else statusStr = `⚠️ MISSED`;
           }
@@ -2212,7 +2369,7 @@ client.on(Events.InteractionCreate, async interaction => {
         .addOptions(instances.map(b => {
           const e = data.kills[b.id];
           let status = "🟢 READY";
-          if (e) { const cd = e.respawnTime - now; status = cd > 0 ? `🔴 ${format(cd)}` : `🟡 SPAWNED`; }
+          if (e) { const cd = e.respawnTime - now; status = cd > 0 ? `⏳ ${format(cd)}` : `🟡 SPAWNED`; }
           return { label: `#${b.index} — ${status}`, value: b.id };
         }));
       return interaction.reply({
@@ -2273,7 +2430,7 @@ client.on(Events.InteractionCreate, async interaction => {
           if (e) {
             const cd         = e.respawnTime - now;
             const windowLeft = e.respawnTime + cfg.windowMs - now;
-            if (cd > 0) status = `🔴 ${format(cd)}`;
+            if (cd > 0) status = `⏳ ${format(cd)}`;
             else if (windowLeft > 0) status = `🟢 WIN ${format(windowLeft)}`;
             else status = `⚠️ MISSED`;
           }
