@@ -357,12 +357,14 @@ function restoreSpawnWarningFlags() {
       freedCount++;
       continue;
     }
-    spawnWarnings[b.id] = {
-      warned5:       cooldown <= 5 * 60 * 1000,
-      warned20:      cooldown <= 0 && (windowEnd - now) <= 20 * 60 * 1000,
-      windowCreated: cooldown <= 0,
-      missedHandled: windowExpired,
-    };
+    const windowCurrentlyOpen = cooldown <= 0 && windowLeft > 0;
+
+spawnWarnings[b.id] = {
+  warned5:       cooldown <= 5 * 60 * 1000,
+  warned20:      cooldown <= 0 && (windowEnd - now) <= 20 * 60 * 1000,
+  windowCreated: windowCurrentlyOpen ? false : cooldown <= 0,
+  missedHandled: windowExpired,
+};
   }
 
   if (freedCount > 0) save();
