@@ -1532,46 +1532,6 @@ function tickMissedWindowPings(channel, now) {
   // Disabled — missed windows free the slot and log only
 }
 
-    if (untilStart <= 0 && !w.msg && untilEnd + WINDOW_GRACE_MS > 0) {
-      const advCount = missedCount[id] || 0;
-      channel.send({
-        embeds:     isWorld ? [buildWBMissedWindowEmbed(w.boss, w.nextWindowStart, w.nextWindowEnd)] : [buildSAMissedWindowEmbed(w.boss, w.nextWindowStart, w.nextWindowEnd, advCount)],
-        components: isWorld ? buildWBMissedWindowComponents(id) : buildSAMissedWindowComponents(id),
-        flags: MessageFlags.SuppressNotifications
-      }).then(msg => { w.msg = msg; }).catch(() => {});
-    }
-
-    if (!w.pingedStart && untilStart <= 0 && untilEnd > 0) {
-      w.pingedStart  = true;
-      const tsClose  = Math.floor(w.nextWindowEnd / 1000);
-      const advCount = missedCount[id] || 0;
-      const prefix   = isWorld ? "[World Boss]" : "[Shadow Abyss]";
-      const bossKey  = w.boss?.key ?? null;
-      postEveryoneWarning(channel, `${id}_missed_start`,
-        `@everyone 🔶 **${prefix} ${w.boss.name}** missed window is now open! ` +
-        `Closes in **${format(untilEnd)}** — <t:${tsClose}:t>\n` +
-        (isWorld
-          ? `⚠️ Timer might be incorrect — boss may take longer to respawn.`
-          : `⚠️ Missed: ${advCount}/${SA_MAX_AUTO_ADVANCE} — timer might be incorrect.`),
-        EVERYONE_WARNING_LIFESPAN_MS, bossKey
-      );
-    }
-
-    if (!w.pinged20min && untilEnd > 0 && untilEnd <= 20 * 60 * 1000) {
-      w.pinged20min  = true;
-      const advCount = missedCount[id] || 0;
-      const prefix   = isWorld ? "[World Boss]" : "[Shadow Abyss]";
-      const bossKey  = w.boss?.key ?? null;
-      postEveryoneWarning(channel, `${id}_missed_20min`,
-        isWorld
-          ? `@everyone ⚠️ **${prefix} ${w.boss.name}** missed-window: **20 minutes remaining** in the spawn window!`
-          : `@everyone ⚠️ **${prefix} ${w.boss.name}** missed-window: **20 minutes remaining**! (${advCount}/${SA_MAX_AUTO_ADVANCE} missed)`,
-        EVERYONE_WARNING_LIFESPAN_MS, bossKey
-      );
-    }
-  
-}
-
 // =====================
 // WARNING SYSTEM — Shadow Abyss
 // =====================
