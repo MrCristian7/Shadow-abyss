@@ -1308,10 +1308,7 @@ async function repinDashboard(channel) {
   try {
     const now = Date.now();
 
-    if (logMessage) logMessage.delete().catch(() => {});
-    logMessage = await channel.send({
-      embeds: [buildLogEmbed()], flags: MessageFlags.SuppressNotifications
-    }).catch(err => { console.error("[Repin] Failed to re-post log message:", err.message ?? err); return null; });
+    
 
     // Pinned message is buttons-only — no embed
     const newDashboard = await channel.send({
@@ -1683,9 +1680,7 @@ client.once(Events.ClientReady, async () => {
   try { await initBackupMessage(await client.channels.fetch(LOG_CHANNEL_ID)); }
   catch (err) { console.error("[Backup] Could not init:", err.message ?? err); }
 
-  logMessage = await channel.send({
-    embeds: [buildLogEmbed()], flags: MessageFlags.SuppressNotifications
-  }).catch(err => { console.error("[Ready] Failed to post log message:", err.message ?? err); return null; });
+  
 
   // Pinned message is buttons-only — no embed
   dashboardMessage = await channel.send({
