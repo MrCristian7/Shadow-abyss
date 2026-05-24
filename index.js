@@ -1569,7 +1569,7 @@ function tickMissedWindowPings(channel, now) {
         EVERYONE_WARNING_LIFESPAN_MS, bossKey
       );
     }
-  }
+  
 }
 
 // =====================
