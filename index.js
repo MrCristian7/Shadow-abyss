@@ -357,14 +357,15 @@ function restoreSpawnWarningFlags() {
       freedCount++;
       continue;
     }
+    const windowLeft          = windowEnd - now;
     const windowCurrentlyOpen = cooldown <= 0 && windowLeft > 0;
 
-spawnWarnings[b.id] = {
-  warned5:       cooldown <= 5 * 60 * 1000,
-  warned20:      cooldown <= 0 && (windowEnd - now) <= 20 * 60 * 1000,
-  windowCreated: windowCurrentlyOpen ? false : cooldown <= 0,
-  missedHandled: windowExpired,
-};
+    spawnWarnings[b.id] = {
+      warned5:       cooldown <= 5 * 60 * 1000,
+      warned20:      cooldown <= 0 && (windowEnd - now) <= 20 * 60 * 1000,
+      windowCreated: windowCurrentlyOpen ? false : cooldown <= 0,
+      missedHandled: windowExpired,
+    };
   }
 
   if (freedCount > 0) save();
@@ -1528,11 +1529,8 @@ function startLoop() {
 // MISSED WINDOW PINGS
 // =====================
 function tickMissedWindowPings(channel, now) {
-  for (const id of Object.keys(missedWindowMessages)) {
-    const w          = missedWindowMessages[id];
-    const isWorld    = !!w.isWorld;
-    const untilStart = w.nextWindowStart - now;
-    const untilEnd   = w.nextWindowEnd   - now;
+  // Disabled — missed windows free the slot and log only
+}
 
     if (untilStart <= 0 && !w.msg && untilEnd + WINDOW_GRACE_MS > 0) {
       const advCount = missedCount[id] || 0;
