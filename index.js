@@ -1308,8 +1308,6 @@ async function repinDashboard(channel) {
   try {
     const now = Date.now();
 
-    
-
     // Pinned message is buttons-only — no embed
     const newDashboard = await channel.send({
       content: "**🌑 Shadow Abyss — Boss Tracker**",
@@ -1321,11 +1319,36 @@ async function repinDashboard(channel) {
     if (dashboardMessage) dashboardMessage.delete().catch(() => {});
     dashboardMessage = newDashboard;
 
-    for (const id of Object.keys(missedWindowMessages)) {
-      const w = missedWindowMessages[id];
-      if (w.nextWindowStart > now) { if (w.msg) { w.msg.delete().catch(() => {}); w.msg = null; } continue; }
-      if (w.nextWindowEnd + WINDOW_GRACE_MS <= now) { if (w.msg) w.msg.delete().catch(() => {}); delete missedWindowMessages[id]; continue; }
-      if (w.msg) w.msg.delete().catch(() => {});
+    // Delete all existing spawn window messages from Discord first
+    for (const [id, w] of Object.entries(spawnWindowMessages)) {
+      if (w.msg) { w.msg.delete().catch(() => {}); w.msg = null; }
+      clearTimeout(w.deleteTimer);
+      if (w.windowEnd + WINDOW_GRACE_MS <= now) { delete spawnWindowMessages[id]; }
+    }
+
+    // Delete all existing missed window messages from Discord first
+    for (const [id, w] of Object.entries(missedWindowMessages)) {
+      if (w.msg) { w.msg.delete().catch(() => {}); w.msg = null; }
+    }
+
+    // Repost still-valid spawn window messages
+    for (const [id, w] of Object.entries(spawnWindowMessages)) {
+      if (w.windowEnd + WINDOW_GRACE_MS <= now) { delete spawnWindowMessages[id]; continue; }
+      const isWorld = !!w.isWorld;
+      w.msg = await channel.send({
+        embeds:     [isWorld ? buildWBSpawnWindowEmbed(w.boss, w.windowStart, w.windowEnd) : buildSASpawnWindowEmbed(w.boss, w.windowStart, w.windowEnd)],
+        components: isWorld ? buildWBSpawnWindowComponents(id) : buildSASpawnWindowComponents(id),
+        flags: MessageFlags.SuppressNotifications
+      }).catch(() => null);
+      clearTimeout(w.deleteTimer);
+      const deleteAfter = (w.windowEnd - now) + WINDOW_GRACE_MS;
+      w.deleteTimer = setTimeout(() => { if (w.msg) w.msg.delete().catch(() => {}); delete spawnWindowMessages[id]; }, Math.max(deleteAfter, 0));
+    }
+
+    // Repost still-valid missed window messages
+    for (const [id, w] of Object.entries(missedWindowMessages)) {
+      if (w.nextWindowEnd + WINDOW_GRACE_MS <= now) { delete missedWindowMessages[id]; continue; }
+      if (w.nextWindowStart > now) { w.msg = null; continue; }
       const isWorld  = !!w.isWorld;
       const advCount = missedCount[id] || 0;
       w.msg = await channel.send({
@@ -1333,19 +1356,6 @@ async function repinDashboard(channel) {
         components: isWorld ? buildWBMissedWindowComponents(id) : buildSAMissedWindowComponents(id),
         flags: MessageFlags.SuppressNotifications
       }).catch(() => null);
-    }
-
-    for (const id of Object.keys(spawnWindowMessages)) {
-      const w = spawnWindowMessages[id];
-      if (w.msg) w.msg.delete().catch(() => {});
-      if (w.windowEnd + WINDOW_GRACE_MS > now) {
-        const isWorld = !!WORLD_BOSSES.find(b => b.id === id);
-        w.msg = await channel.send({
-          embeds:     [isWorld ? buildWBSpawnWindowEmbed(w.boss, w.windowStart, w.windowEnd) : buildSASpawnWindowEmbed(w.boss, w.windowStart, w.windowEnd)],
-          components: isWorld ? buildWBSpawnWindowComponents(id) : buildSASpawnWindowComponents(id),
-          flags: MessageFlags.SuppressNotifications
-        }).catch(() => null);
-      } else { delete spawnWindowMessages[id]; }
     }
 
     lastRepinTime     = now;
@@ -1680,8 +1690,6 @@ client.once(Events.ClientReady, async () => {
   try { await initBackupMessage(await client.channels.fetch(LOG_CHANNEL_ID)); }
   catch (err) { console.error("[Backup] Could not init:", err.message ?? err); }
 
-  
-
   // Pinned message is buttons-only — no embed
   dashboardMessage = await channel.send({
     content: "**🌑 Shadow Abyss — Boss Tracker**",
@@ -1696,6 +1704,18 @@ client.once(Events.ClientReady, async () => {
   startBackupLoop();
   setTimeout(() => runBackup().catch(err => console.error("[Backup] Startup failed:", err.message ?? err)), 5000);
 });
+
+// =====================
+// HELPER — build a time input field (blank = now)
+// =====================
+function buildTimeInput() {
+  return new TextInputBuilder()
+    .setCustomId("time")
+    .setLabel("HH:MM (server time) or leave blank for now")
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder("Leave blank = now, or e.g. 21:34")
+    .setRequired(false);
+}
 
 // =====================
 // INTERACTIONS
@@ -1746,9 +1766,7 @@ client.on(Events.InteractionCreate, async interaction => {
       if (!boss) return interaction.reply({ content: `❌ No goblin found for ${key} S${server}.`, flags: MessageFlags.Ephemeral });
       log(interaction.user, `SA: Selected server ${server} for ${boss.name} (auto-picked goblin)`);
       const modal = new ModalBuilder().setCustomId(`sa_killtime_${boss.id}`).setTitle(`Kill Time — ${boss.name}`);
-      modal.addComponents(new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId("time").setLabel("HH:MM (24h, server time) or 'now'").setStyle(TextInputStyle.Short).setPlaceholder("e.g. 21:34 or now")
-      ));
+      modal.addComponents(new ActionRowBuilder().addComponents(buildTimeInput()));
       return interaction.showModal(modal);
     }
 
@@ -1757,9 +1775,7 @@ client.on(Events.InteractionCreate, async interaction => {
       if (boss) {
         log(interaction.user, `SA: Auto-picked ${boss.name} for kill`);
         const modal = new ModalBuilder().setCustomId(`sa_killtime_${boss.id}`).setTitle(`Kill Time — ${boss.name}`);
-        modal.addComponents(new ActionRowBuilder().addComponents(
-          new TextInputBuilder().setCustomId("time").setLabel("HH:MM (24h, server time) or 'now'").setStyle(TextInputStyle.Short).setPlaceholder("e.g. 21:34 or now")
-        ));
+        modal.addComponents(new ActionRowBuilder().addComponents(buildTimeInput()));
         return interaction.showModal(modal);
       }
       const instances = getSAFixedInstances(key, server);
@@ -1783,9 +1799,7 @@ client.on(Events.InteractionCreate, async interaction => {
     const boss = SHADOW_BOSSES.find(b => b.id === id);
     log(interaction.user, `SA: Selected server ${server} for ${boss.name}`);
     const modal = new ModalBuilder().setCustomId(`sa_killtime_${boss.id}`).setTitle(`Kill Time — ${boss.name}`);
-    modal.addComponents(new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId("time").setLabel("HH:MM (24h, server time) or 'now'").setStyle(TextInputStyle.Short).setPlaceholder("e.g. 21:34 or now")
-    ));
+    modal.addComponents(new ActionRowBuilder().addComponents(buildTimeInput()));
     return interaction.showModal(modal);
   }
 
@@ -1795,9 +1809,7 @@ client.on(Events.InteractionCreate, async interaction => {
     const boss = SHADOW_BOSSES.find(b => b.id === id);
     log(interaction.user, `SA: Manually picked instance ${boss.name}`);
     const modal = new ModalBuilder().setCustomId(`sa_killtime_${id}`).setTitle(`Kill Time — ${boss.name}`);
-    modal.addComponents(new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId("time").setLabel("HH:MM (24h, server time) or 'now'").setStyle(TextInputStyle.Short).setPlaceholder("e.g. 21:34 or now")
-    ));
+    modal.addComponents(new ActionRowBuilder().addComponents(buildTimeInput()));
     return interaction.showModal(modal);
   }
 
@@ -1806,7 +1818,7 @@ client.on(Events.InteractionCreate, async interaction => {
     snapshot();
     const id   = interaction.customId.replace("sa_killtime_", "");
     const boss = SHADOW_BOSSES.find(b => b.id === id);
-    const raw  = interaction.fields.getTextInputValue("time").trim().toLowerCase();
+    const raw  = interaction.fields.getTextInputValue("time").trim().toLowerCase() || "now";
     const now  = Date.now();
     let killTime;
     if (raw === "now") { killTime = now; }
@@ -1848,9 +1860,7 @@ client.on(Events.InteractionCreate, async interaction => {
     const boss = SHADOW_BOSSES.find(b => b.id === id);
     log(interaction.user, `SA: Opened set-time modal for ${boss.name} (window)`);
     const modal = new ModalBuilder().setCustomId(`sa_window_killtime_${id}`).setTitle(`Set Kill Time — ${boss.name}`);
-    modal.addComponents(new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId("time").setLabel("HH:MM (24h, server time) or 'now'").setStyle(TextInputStyle.Short).setPlaceholder("e.g. 21:34 or now")
-    ));
+    modal.addComponents(new ActionRowBuilder().addComponents(buildTimeInput()));
     return interaction.showModal(modal);
   }
 
@@ -1859,7 +1869,7 @@ client.on(Events.InteractionCreate, async interaction => {
     snapshot();
     const id   = interaction.customId.replace("sa_window_killtime_", "");
     const boss = SHADOW_BOSSES.find(b => b.id === id);
-    const raw  = interaction.fields.getTextInputValue("time").trim().toLowerCase();
+    const raw  = interaction.fields.getTextInputValue("time").trim().toLowerCase() || "now";
     const now  = Date.now();
     let killTime;
     if (raw === "now") { killTime = now; }
@@ -1900,9 +1910,7 @@ client.on(Events.InteractionCreate, async interaction => {
     const boss = SHADOW_BOSSES.find(b => b.id === id);
     log(interaction.user, `SA: Opened set-time modal for ${boss.name} (missed window)`);
     const modal = new ModalBuilder().setCustomId(`sa_missed_killtime_${id}`).setTitle(`Set Kill Time — ${boss.name}`);
-    modal.addComponents(new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId("time").setLabel("HH:MM (24h, server time) or 'now'").setStyle(TextInputStyle.Short).setPlaceholder("e.g. 21:34 or now")
-    ));
+    modal.addComponents(new ActionRowBuilder().addComponents(buildTimeInput()));
     return interaction.showModal(modal);
   }
 
@@ -1911,7 +1919,7 @@ client.on(Events.InteractionCreate, async interaction => {
     snapshot();
     const id   = interaction.customId.replace("sa_missed_killtime_", "");
     const boss = SHADOW_BOSSES.find(b => b.id === id);
-    const raw  = interaction.fields.getTextInputValue("time").trim().toLowerCase();
+    const raw  = interaction.fields.getTextInputValue("time").trim().toLowerCase() || "now";
     const now  = Date.now();
     let killTime;
     if (raw === "now") { killTime = now; }
@@ -1953,9 +1961,7 @@ client.on(Events.InteractionCreate, async interaction => {
       if (boss) {
         log(interaction.user, `WB: Auto-picked ${boss.name} for kill`);
         const modal = new ModalBuilder().setCustomId(`wb_killtime_${boss.id}`).setTitle(`Kill Time — ${boss.name}`);
-        modal.addComponents(new ActionRowBuilder().addComponents(
-          new TextInputBuilder().setCustomId("time").setLabel("HH:MM (24h, server time) or 'now'").setStyle(TextInputStyle.Short).setPlaceholder("e.g. 21:34 or now")
-        ));
+        modal.addComponents(new ActionRowBuilder().addComponents(buildTimeInput()));
         return interaction.showModal(modal);
       }
       const instances = getWBInstances(key, server);
@@ -1986,9 +1992,7 @@ client.on(Events.InteractionCreate, async interaction => {
     const boss = WORLD_BOSSES.find(b => b.id === id);
     log(interaction.user, `WB: Selected server ${server} for ${boss.name}`);
     const modal = new ModalBuilder().setCustomId(`wb_killtime_${id}`).setTitle(`Kill Time — ${boss.name}`);
-    modal.addComponents(new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId("time").setLabel("HH:MM (24h, server time) or 'now'").setStyle(TextInputStyle.Short).setPlaceholder("e.g. 21:34 or now")
-    ));
+    modal.addComponents(new ActionRowBuilder().addComponents(buildTimeInput()));
     return interaction.showModal(modal);
   }
 
@@ -1998,9 +2002,7 @@ client.on(Events.InteractionCreate, async interaction => {
     const boss = WORLD_BOSSES.find(b => b.id === id);
     log(interaction.user, `WB: Manually picked instance ${boss.name}`);
     const modal = new ModalBuilder().setCustomId(`wb_killtime_${id}`).setTitle(`Kill Time — ${boss.name}`);
-    modal.addComponents(new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId("time").setLabel("HH:MM (24h, server time) or 'now'").setStyle(TextInputStyle.Short).setPlaceholder("e.g. 21:34 or now")
-    ));
+    modal.addComponents(new ActionRowBuilder().addComponents(buildTimeInput()));
     return interaction.showModal(modal);
   }
 
@@ -2009,7 +2011,7 @@ client.on(Events.InteractionCreate, async interaction => {
     snapshot();
     const id   = interaction.customId.replace("wb_killtime_", "");
     const boss = WORLD_BOSSES.find(b => b.id === id);
-    const raw  = interaction.fields.getTextInputValue("time").trim().toLowerCase();
+    const raw  = interaction.fields.getTextInputValue("time").trim().toLowerCase() || "now";
     const now  = Date.now();
     let killTime;
     if (raw === "now") { killTime = now; }
@@ -2052,9 +2054,7 @@ client.on(Events.InteractionCreate, async interaction => {
     const boss = WORLD_BOSSES.find(b => b.id === id);
     log(interaction.user, `WB: Opened set-time modal for ${boss.name} (window)`);
     const modal = new ModalBuilder().setCustomId(`wb_window_killtime_${id}`).setTitle(`Set Kill Time — ${boss.name}`);
-    modal.addComponents(new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId("time").setLabel("HH:MM (24h, server time) or 'now'").setStyle(TextInputStyle.Short).setPlaceholder("e.g. 21:34 or now")
-    ));
+    modal.addComponents(new ActionRowBuilder().addComponents(buildTimeInput()));
     return interaction.showModal(modal);
   }
 
@@ -2063,7 +2063,7 @@ client.on(Events.InteractionCreate, async interaction => {
     snapshot();
     const id   = interaction.customId.replace("wb_window_killtime_", "");
     const boss = WORLD_BOSSES.find(b => b.id === id);
-    const raw  = interaction.fields.getTextInputValue("time").trim().toLowerCase();
+    const raw  = interaction.fields.getTextInputValue("time").trim().toLowerCase() || "now";
     const now  = Date.now();
     let killTime;
     if (raw === "now") { killTime = now; }
@@ -2106,9 +2106,7 @@ client.on(Events.InteractionCreate, async interaction => {
     const boss = WORLD_BOSSES.find(b => b.id === id);
     log(interaction.user, `WB: Opened set-time modal for ${boss.name} (missed window)`);
     const modal = new ModalBuilder().setCustomId(`wb_missed_killtime_${id}`).setTitle(`Set Kill Time — ${boss.name}`);
-    modal.addComponents(new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId("time").setLabel("HH:MM (24h, server time) or 'now'").setStyle(TextInputStyle.Short).setPlaceholder("e.g. 21:34 or now")
-    ));
+    modal.addComponents(new ActionRowBuilder().addComponents(buildTimeInput()));
     return interaction.showModal(modal);
   }
 
@@ -2117,7 +2115,7 @@ client.on(Events.InteractionCreate, async interaction => {
     snapshot();
     const id   = interaction.customId.replace("wb_missed_killtime_", "");
     const boss = WORLD_BOSSES.find(b => b.id === id);
-    const raw  = interaction.fields.getTextInputValue("time").trim().toLowerCase();
+    const raw  = interaction.fields.getTextInputValue("time").trim().toLowerCase() || "now";
     const now  = Date.now();
     let killTime;
     if (raw === "now") { killTime = now; }
@@ -2221,9 +2219,7 @@ client.on(Events.InteractionCreate, async interaction => {
     const boss = SHADOW_BOSSES.find(b => b.id === id);
     log(interaction.user, `SA Insert: selected ${boss.name}`);
     const modal = new ModalBuilder().setCustomId(`sa_killtime_${id}`).setTitle(`Insert Kill Time — ${boss.name}`);
-    modal.addComponents(new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId("time").setLabel("HH:MM (24h, server time) or 'now'").setStyle(TextInputStyle.Short).setPlaceholder("e.g. 21:34 or now")
-    ));
+    modal.addComponents(new ActionRowBuilder().addComponents(buildTimeInput()));
     return interaction.showModal(modal);
   }
 
@@ -2233,9 +2229,7 @@ client.on(Events.InteractionCreate, async interaction => {
     const boss = SHADOW_BOSSES.find(b => b.id === id);
     log(interaction.user, `SA Insert: selected fixed instance ${boss.name}`);
     const modal = new ModalBuilder().setCustomId(`sa_killtime_${id}`).setTitle(`Insert Kill Time — ${boss.name}`);
-    modal.addComponents(new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId("time").setLabel("HH:MM (24h, server time) or 'now'").setStyle(TextInputStyle.Short).setPlaceholder("e.g. 21:34 or now")
-    ));
+    modal.addComponents(new ActionRowBuilder().addComponents(buildTimeInput()));
     return interaction.showModal(modal);
   }
 
@@ -2245,9 +2239,7 @@ client.on(Events.InteractionCreate, async interaction => {
     const boss = SHADOW_BOSSES.find(b => b.id === id);
     log(interaction.user, `SA Insert: selected goblin ${boss.name}`);
     const modal = new ModalBuilder().setCustomId(`sa_killtime_${id}`).setTitle(`Insert Kill Time — ${boss.name}`);
-    modal.addComponents(new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId("time").setLabel("HH:MM (24h, server time) or 'now'").setStyle(TextInputStyle.Short).setPlaceholder("e.g. 21:34 or now")
-    ));
+    modal.addComponents(new ActionRowBuilder().addComponents(buildTimeInput()));
     return interaction.showModal(modal);
   }
 
@@ -2285,9 +2277,7 @@ client.on(Events.InteractionCreate, async interaction => {
     const boss = WORLD_BOSSES.find(b => b.id === id);
     log(interaction.user, `WB Insert: selected ${boss.name}`);
     const modal = new ModalBuilder().setCustomId(`wb_killtime_${id}`).setTitle(`Insert Kill Time — ${boss.name}`);
-    modal.addComponents(new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId("time").setLabel("HH:MM (24h, server time) or 'now'").setStyle(TextInputStyle.Short).setPlaceholder("e.g. 21:34 or now")
-    ));
+    modal.addComponents(new ActionRowBuilder().addComponents(buildTimeInput()));
     return interaction.showModal(modal);
   }
 
@@ -2297,9 +2287,7 @@ client.on(Events.InteractionCreate, async interaction => {
     const boss = WORLD_BOSSES.find(b => b.id === id);
     log(interaction.user, `WB Insert: selected instance ${boss.name}`);
     const modal = new ModalBuilder().setCustomId(`wb_killtime_${id}`).setTitle(`Insert Kill Time — ${boss.name}`);
-    modal.addComponents(new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId("time").setLabel("HH:MM (24h, server time) or 'now'").setStyle(TextInputStyle.Short).setPlaceholder("e.g. 21:34 or now")
-    ));
+    modal.addComponents(new ActionRowBuilder().addComponents(buildTimeInput()));
     return interaction.showModal(modal);
   }
 
