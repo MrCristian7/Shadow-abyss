@@ -1571,7 +1571,7 @@ function checkSAWarnings(channel) {
       w.warned20 = true;
       postEveryoneWarning(channel, `${b.id}_20min`, `@everyone ⚠️ **[Shadow Abyss] ${b.name}** goblin window closes in 20 minutes!`);
     }
-    if (!isGoblin && cooldown <= 0 && cooldown >= -5 * 60 * 1000 && !w.windowCreated) {
+    if (!isGoblin && cooldown <= 0 && windowLeft > 0 && !w.windowCreated) {
       w.windowCreated = true;
       clearEveryoneWarning(`${b.id}_5min`);
 
@@ -1580,7 +1580,8 @@ function checkSAWarnings(channel) {
       const tsRespawn = Math.floor(e.respawnTime / 1000);
       postEveryoneWarning(channel, `${b.id}_spawned`,
         `@everyone 🌑 **[Shadow Abyss] ${b.name}** has spawned! Log the kill when done.\n<t:${tsRespawn}:t>`,
-        10 * 60 * 1000);
+        Math.min(10 * 60 * 1000, windowLeft));
+    }
     }
     if (timeSinceWindowExpired >= 10 * 60 * 1000 && !w.missedHandled) {
       w.missedHandled = true;
