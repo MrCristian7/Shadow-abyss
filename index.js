@@ -1574,9 +1574,7 @@ function checkSAWarnings(channel) {
     if (!isGoblin && cooldown <= 0 && windowLeft > 0 && !w.windowCreated) {
       w.windowCreated = true;
       clearEveryoneWarning(`${b.id}_5min`);
-
       if (!missedWindowMessages[b.id]) createSASpawnWindow(b, b.id, channel, windowEnd);
-
       const tsRespawn = Math.floor(e.respawnTime / 1000);
       postEveryoneWarning(channel, `${b.id}_spawned`,
         `@everyone 🌑 **[Shadow Abyss] ${b.name}** has spawned! Log the kill when done.\n<t:${tsRespawn}:t>`,
@@ -1589,13 +1587,6 @@ function checkSAWarnings(channel) {
     }
   }
 }
-      w.missedHandled = true;
-      if (isGoblin && advCount < SA_MAX_AUTO_ADVANCE) handleSAMissedWindowGoblin(b, b.id, channel);
-      else if (!isGoblin) handleSAMissedWindowFixed(b, b.id, channel);
-    }
-  }
-}
-
 // =====================
 // WARNING SYSTEM — World Bosses
 // =====================
