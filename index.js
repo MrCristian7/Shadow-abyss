@@ -1582,8 +1582,13 @@ function checkSAWarnings(channel) {
         `@everyone 🌑 **[Shadow Abyss] ${b.name}** has spawned! Log the kill when done.\n<t:${tsRespawn}:t>`,
         Math.min(10 * 60 * 1000, windowLeft));
     }
-    }
     if (timeSinceWindowExpired >= 10 * 60 * 1000 && !w.missedHandled) {
+      w.missedHandled = true;
+      if (isGoblin && advCount < SA_MAX_AUTO_ADVANCE) handleSAMissedWindowGoblin(b, b.id, channel);
+      else if (!isGoblin) handleSAMissedWindowFixed(b, b.id, channel);
+    }
+  }
+}
       w.missedHandled = true;
       if (isGoblin && advCount < SA_MAX_AUTO_ADVANCE) handleSAMissedWindowGoblin(b, b.id, channel);
       else if (!isGoblin) handleSAMissedWindowFixed(b, b.id, channel);
