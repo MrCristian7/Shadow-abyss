@@ -632,7 +632,7 @@ function recalcSpawnWarningsAfterUndo() {
     }
     const isGoblin      = b.type === "goblin";
     const cooldown      = e.respawnTime - now;
-    const windowEnd     = isGoblin ? e.respawnTime + SA_GOBLIN_WINDOW_MS : e.respawnTime + 5 * 60 * 1000;
+    const windowEnd     = isGoblin ? e.respawnTime + SA_GOBLIN_WINDOW_MS : e.respawnTime + SA_FIXED_MISSED_WINDOW_MS;
     const windowExpired = now > windowEnd;
     spawnWarnings[b.id] = {
       warned5:       cooldown <= 5 * 60 * 1000,
@@ -1550,7 +1550,7 @@ function checkSAWarnings(channel) {
     if (!e) continue;
     const isGoblin               = b.type === "goblin";
     const cooldown               = e.respawnTime - now;
-    const windowEnd              = isGoblin ? e.respawnTime + SA_GOBLIN_WINDOW_MS : e.respawnTime + 5 * 60 * 1000;
+    const windowEnd              = isGoblin ? e.respawnTime + SA_GOBLIN_WINDOW_MS : e.respawnTime + SA_FIXED_MISSED_WINDOW_MS;
     const windowLeft             = windowEnd - now;
     const timeSinceWindowExpired = now - windowEnd;
     const advCount               = missedCount[b.id] || 0;
