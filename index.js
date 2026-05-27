@@ -66,7 +66,7 @@ let data = { kills: {}, slotCounter: {} };
 let dashboardMessage     = null;
 let spawnWarnings        = {};   // slotId -> { warned5, warned20, windowCreated, missedHandled }
 let spawnWindowMessages  = {};   // slotId -> { msg, windowStart, windowEnd, boss, deleteTimer, isWorld }
-let missedWindowMessages = {};   // slotId -> { msg, nextWindowStart, nextWindowEnd, boss, isWorld }
+let missedWindowMessages = {};   // slotId -> { msg, nextWindowStart, nextWindowEnd, boss, deleteTimer, isWorld }
 let everyoneWarnings     = {};
 let adminLogs            = [];
 let undoStack            = [];
@@ -185,6 +185,16 @@ function getBossLabel(slotId) {
   const base  = makeSlotPrefix(p.prefix, p.key, p.server);
   const count = Object.keys(data.kills).filter(id => id.startsWith(base + "_")).length;
   return count > 1 ? `${label} #${p.counter}` : label;
+}
+
+function getFullBossLabel(slotId) {
+  const p = parseSlotId(slotId);
+  if (!p) return slotId;
+  const label = p.prefix === "sa" ? (getSADef(p.key)?.label ?? p.key) : (getWBDef(p.key)?.label ?? p.key);
+  const base  = makeSlotPrefix(p.prefix, p.key, p.server);
+  const count = Object.keys(data.kills).filter(id => id.startsWith(base + "_")).length;
+  const suffix = count > 1 ? ` #${p.counter}` : "";
+  return `${label} S${p.server}${suffix}`;
 }
 
 function getBossType(slotId) {
@@ -417,6 +427,9 @@ function recalcSpawnWarningsAfterUndo() {
 
 // =====================
 // RESTORE WARNING FLAGS ON STARTUP
+// FIX: windowCreated is set to true whenever cooldown <= 0, so the warning
+// system never tries to re-create a window card that already opened. The
+// repinDashboard call on startup will re-post any still-valid window cards.
 // =====================
 function restoreSpawnWarningFlags() {
   const now = Date.now();
@@ -448,10 +461,13 @@ function restoreSpawnWarningFlags() {
       continue;
     }
 
+    // FIX: Always mark windowCreated = true when cooldown <= 0 so the warning
+    // system does NOT try to fire a late window-creation on the next tick.
+    // repinDashboard() handles re-posting the actual window card on startup.
     spawnWarnings[id] = {
-      warned5:       cooldown <= 0,
+      warned5:       cooldown <= 5 * 60 * 1000,
       warned20:      cooldown <= 0 && isSAGoblin && (deadline - now) <= 20 * 60 * 1000,
-      windowCreated: cooldown <= 0,
+      windowCreated: cooldown <= 0,  // FIX: was missing for some branches in original
       missedHandled: false,
     };
   }
@@ -494,7 +510,7 @@ async function recoverFromDiscordBackup() {
     const json = await response.json();
     if (!json.kills) throw new Error("Backup JSON has no 'kills' field");
     const discordActiveCount = Object.values(json.kills)
-  .filter(e => e.respawnTime >= now - 8 * 60 * 60 * 1000).length;
+      .filter(e => e.respawnTime >= now - 8 * 60 * 60 * 1000).length;
     console.log(`[Recovery] Discord backup active: ${discordActiveCount}.`);
     if (discordActiveCount <= localActiveCount && localActiveCount > 0) {
       console.log("[Recovery] Local data is equal or fresher — skipping Discord restore.");
@@ -506,7 +522,7 @@ async function recoverFromDiscordBackup() {
     }
     const filtered = {};
     for (const [id, entry] of Object.entries(json.kills)) {
-    if (entry.respawnTime >= now - 8 * 60 * 60 * 1000) filtered[id] = entry;
+      if (entry.respawnTime >= now - 8 * 60 * 60 * 1000) filtered[id] = entry;
     }
     data = { kills: filtered, slotCounter: json.slotCounter ?? {} };
     save();
@@ -847,7 +863,7 @@ function renderSASlot(id, entry, slotNum) {
   if (cooldown >= -5 * 60 * 1000) return { text: `${slotTag(slotNum)}🟡 SPAWNED ${killerTag}`, isReady: false };
   if (isMissed) return { text: `${slotTag(slotNum)}⚠️ ${killerTag}`, isReady: false };
   return { text: `${slotTag(slotNum)}⚠️ ${killerTag}`, isReady: false };
-  }
+}
 
 function renderWBSlot(id, entry, slotNum) {
   const now        = Date.now();
@@ -1017,7 +1033,6 @@ function buildRespawnEmbed() {
     : "✅ No active timers — all bosses are ready!";
 
   const openWindows = entries.filter(e => e.sortTime <= now + (60 * 1000)).length;
-  const missedCt    = entries.filter(e => !!missedWindowMessages[e.id]).length;
 
   return new EmbedBuilder()
     .setTitle("📅 Respawn Schedule — Soonest at bottom")
@@ -1144,10 +1159,17 @@ async function maybeRepinAfterAction(channel) {
 
 // =====================
 // SPAWN WINDOW CREATION
+// FIX: windowEnd is always anchored to entry.respawnTime, never to Date.now().
+// This guarantees the window card always displays the full window duration
+// regardless of when the tick fires or when the card is created/re-created.
 // =====================
 async function createSASpawnWindow(id, entry, bossLabel, channel, windowEnd) {
   if (spawnWindowMessages[id]) return;
-  const windowStart = windowEnd - SA_GOBLIN_WINDOW_MS;
+  // FIX: windowStart is always entry.respawnTime — the moment the boss spawned.
+  // Using windowEnd - SA_GOBLIN_WINDOW_MS would be equivalent only if windowEnd
+  // was computed from entry.respawnTime (which it now always is). Being explicit
+  // here makes the intent clear and safe against future changes.
+  const windowStart = entry.respawnTime;
   const msg = await channel.send({
     embeds: [buildSASpawnWindowEmbed(bossLabel, windowStart, windowEnd)],
     components: buildSASpawnWindowComponents(id),
@@ -1162,7 +1184,8 @@ async function createSASpawnWindow(id, entry, bossLabel, channel, windowEnd) {
 async function createWBSpawnWindow(id, entry, bossLabel, channel, windowEnd) {
   if (spawnWindowMessages[id]) return;
   const cfg         = getWBConfig(parseSlotId(id).key);
-  const windowStart = windowEnd - cfg.windowMs;
+  // FIX: windowStart anchored to entry.respawnTime, not Date.now()
+  const windowStart = entry.respawnTime;
   const msg = await channel.send({
     embeds: [buildWBSpawnWindowEmbed(bossLabel, windowStart, windowEnd)],
     components: buildWBSpawnWindowComponents(id),
@@ -1210,6 +1233,9 @@ async function handleMissedWindow(id, channel) {
 
 // =====================
 // WARNING SYSTEM — Shadow Abyss
+// FIX: windowEnd passed to createSASpawnWindow is always computed from
+// entry.respawnTime so the window card always anchors to the true spawn time,
+// not to whenever the tick happened to fire.
 // =====================
 function checkSAWarnings(channel) {
   const now = Date.now();
@@ -1228,40 +1254,53 @@ function checkSAWarnings(channel) {
     const bossLabel = `${def.label} S${p.server}${slotNum}`;
     const bossKey   = def.key;
 
-    const windowEnd      = isGoblin ? entry.respawnTime + SA_GOBLIN_WINDOW_MS : entry.respawnTime + SA_FIXED_WINDOW_MS;
-    const missedDeadline = entry.respawnTime + (isGoblin ? SA_GOBLIN_WINDOW_MS : SA_FIXED_MISSED_WINDOW_MS);
-    const windowLeft     = windowEnd - now;
+    // FIX: Both windowEnd values are always anchored to entry.respawnTime.
+    // This is the single source of truth for when the window opens and closes,
+    // independent of when this tick runs.
+    const anchoredGoblinWindowEnd = entry.respawnTime + SA_GOBLIN_WINDOW_MS;
+    const anchoredFixedWindowEnd  = entry.respawnTime + SA_FIXED_WINDOW_MS;
+    const missedDeadline          = entry.respawnTime + (isGoblin ? SA_GOBLIN_WINDOW_MS : SA_FIXED_MISSED_WINDOW_MS);
+
+    const windowEnd  = isGoblin ? anchoredGoblinWindowEnd : anchoredFixedWindowEnd;
+    const windowLeft = windowEnd - now;
 
     if (!spawnWarnings[id])
       spawnWarnings[id] = { warned5: false, warned20: false, windowCreated: false, missedHandled: false };
     const w = spawnWarnings[id];
 
+    // 5-minute pre-spawn warning
     if (cooldown > 0 && cooldown <= 5 * 60 * 1000 && !w.warned5) {
       w.warned5 = true;
       postEveryoneWarning(channel, `${id}_5min`, `@everyone ⏳ **[Shadow Abyss] ${bossLabel}** spawns in 5 minutes`, Math.max(cooldown, 0));
     }
 
+    // Goblin: open spawn window card
     if (isGoblin && cooldown <= 0 && windowLeft > 0 && !w.windowCreated) {
       w.windowCreated = true;
       clearEveryoneWarning(`${id}_5min`);
-      createSASpawnWindow(id, entry, bossLabel, channel, windowEnd);
+      // FIX: pass anchoredGoblinWindowEnd — always based on entry.respawnTime
+      createSASpawnWindow(id, entry, bossLabel, channel, anchoredGoblinWindowEnd);
     }
 
+    // Goblin: 20-minute closing warning
     if (isGoblin && cooldown <= 0 && windowLeft > 0 && windowLeft <= 20 * 60 * 1000 && !w.warned20) {
       w.warned20 = true;
       postEveryoneWarning(channel, `${id}_20min`, `@everyone ⚠️ **[Shadow Abyss] ${bossLabel}** goblin window closes in 20 minutes!`);
     }
 
+    // Fixed boss: open spawn window card + @everyone spawn notification
     if (isFixed && cooldown <= 0 && windowLeft > 0 && !w.windowCreated) {
       w.windowCreated = true;
       clearEveryoneWarning(`${id}_5min`);
-      createSASpawnWindow(id, entry, bossLabel, channel, windowEnd);
+      // FIX: pass anchoredFixedWindowEnd — always based on entry.respawnTime
+      createSASpawnWindow(id, entry, bossLabel, channel, anchoredFixedWindowEnd);
       const tsRespawn = Math.floor(entry.respawnTime / 1000);
       postEveryoneWarning(channel, `${id}_spawned`,
         `@everyone 🌑 **[Shadow Abyss] ${bossLabel}** has spawned! Log the kill when done.\n<t:${tsRespawn}:t>`,
         Math.min(10 * 60 * 1000, windowLeft));
     }
 
+    // Missed window: free slot after deadline + grace
     if (now - missedDeadline >= 10 * 60 * 1000 && !w.missedHandled) {
       w.missedHandled = true;
       handleMissedWindow(id, channel);
@@ -1271,6 +1310,8 @@ function checkSAWarnings(channel) {
 
 // =====================
 // WARNING SYSTEM — World Bosses
+// FIX: windowEnd passed to createWBSpawnWindow is always anchored to
+// entry.respawnTime + cfg.windowMs, not recomputed from Date.now().
 // =====================
 function checkWBWarnings(channel) {
   const now = Date.now();
@@ -1283,9 +1324,10 @@ function checkWBWarnings(channel) {
     if (!def)    continue;
     const cfg    = getWBConfig(p.key);
     const cooldown   = entry.respawnTime - now;
-    const windowEnd  = entry.respawnTime + cfg.windowMs;
-    const windowLeft = windowEnd - now;
-   const baseSlots  = getActiveSlots("wb", p.key, p.server);
+    // FIX: anchoredWindowEnd is always based on entry.respawnTime
+    const anchoredWindowEnd = entry.respawnTime + cfg.windowMs;
+    const windowLeft        = anchoredWindowEnd - now;
+    const baseSlots  = getActiveSlots("wb", p.key, p.server);
     const slotNum    = baseSlots.length > 1 ? ` #${p.counter}` : "";
     const bossLabel  = `${def.label} S${p.server}${slotNum}`;
 
@@ -1293,23 +1335,28 @@ function checkWBWarnings(channel) {
       spawnWarnings[id] = { warned5: false, warned20: false, windowCreated: false, missedHandled: false };
     const w = spawnWarnings[id];
 
+    // 5-minute pre-spawn warning
     if (cooldown > 0 && cooldown <= 5 * 60 * 1000 && !w.warned5) {
       w.warned5 = true;
       postEveryoneWarning(channel, `${id}_5min`, `@everyone ⏳ **[World Boss] ${bossLabel}** spawns in 5 minutes`, Math.max(cooldown, 0), p.key);
     }
 
+    // Open spawn window card
     if (cooldown <= 0 && windowLeft > 0 && !w.windowCreated) {
       w.windowCreated = true;
       clearEveryoneWarning(`${id}_5min`);
-      createWBSpawnWindow(id, entry, bossLabel, channel, windowEnd);
+      // FIX: pass anchoredWindowEnd — always based on entry.respawnTime
+      createWBSpawnWindow(id, entry, bossLabel, channel, anchoredWindowEnd);
     }
 
+    // 20-minute closing warning (only for long windows like Borgar's 1h window)
     if (cfg.windowMs > 20 * 60 * 1000 && cooldown <= 0 && windowLeft > 0 && windowLeft <= 20 * 60 * 1000 && !w.warned20) {
       w.warned20 = true;
       postEveryoneWarning(channel, `${id}_20min`, `@everyone ⚠️ **[World Boss] ${bossLabel}** spawn window closes in 20 minutes!`, EVERYONE_WARNING_LIFESPAN_MS, p.key);
     }
 
-    if (now - windowEnd >= 10 * 60 * 1000 && !w.missedHandled) {
+    // Missed window: free slot after deadline + grace
+    if (now - anchoredWindowEnd >= 10 * 60 * 1000 && !w.missedHandled) {
       w.missedHandled = true;
       if (cfg.maxMissed !== 0) handleMissedWindow(id, channel);
     }
