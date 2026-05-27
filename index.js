@@ -181,8 +181,8 @@ function getWBDef(key) {
 function getBossLabel(slotId) {
   const p = parseSlotId(slotId);
   if (!p) return slotId;
-  if (p.prefix === "sa") return getSADef(p.key)?.label ?? p.key;
-  return getWBDef(p.key)?.label ?? p.key;
+  const label = p.prefix === "sa" ? (getSADef(p.key)?.label ?? p.key) : (getWBDef(p.key)?.label ?? p.key);
+  return `${label} #${p.counter}`;
 }
 
 function getBossType(slotId) {
