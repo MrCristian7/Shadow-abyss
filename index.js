@@ -1007,7 +1007,7 @@ function buildRespawnEmbed() {
       continue;
     }
 
-    entries.push({ sortTime, line: `**[${type}] ${label} S${p.server}** *(${entry.lastKiller})*\n  ${statusLine}` });
+    entries.push({ sortTime, line: `**[${type}] ${getBossLabel(id)} S${p.server}** *(${entry.lastKiller})*\n  ${statusLine}` });
   }
 
   entries.sort((a, b) => b.sortTime - a.sortTime);
