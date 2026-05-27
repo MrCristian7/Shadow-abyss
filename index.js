@@ -833,21 +833,21 @@ function renderSASlot(id, entry, slotNum) {
   if (isGoblin) {
     const windowEnd  = entry.respawnTime + SA_GOBLIN_WINDOW_MS;
     const windowLeft = windowEnd - now;
-    if (cooldown > 0) return { text: `#${slotNum} ⏳ ${format(cooldown)} → ${localTime} ${killerTag}`, isReady: false };
-    if (windowLeft > 0) return { text: `#${slotNum} 🟢 ${format(windowLeft)} left ${killerTag}`, isReady: false };
-    if (isMissed) return { text: `#${slotNum} ⚠️ ${killerTag}`, isReady: false };
-    return { text: `#${slotNum} ⚠️ ${killerTag}`, isReady: false };
+    if (cooldown > 0) return { text: `${slotTag(slotNum)}⏳ ${format(cooldown)} → ${localTime} ${killerTag}`, isReady: false };
+    if (windowLeft > 0) return { text: `${slotTag(slotNum)}🟢 ${format(windowLeft)} left ${killerTag}`, isReady: false };
+    if (isMissed) return { text: `${slotTag(slotNum)}⚠️ ${killerTag}`, isReady: false };
+    return { text: `${slotTag(slotNum)}⚠️ ${killerTag}`, isReady: false };
   }
 
   // Fixed SA boss
   if (cooldown > 0) {
-    if (isMissed) return { text: `#${slotNum} ⚠️ ⏳${format(cooldown)} → ${localTime} ${killerTag}`, isReady: false };
-    return { text: `#${slotNum} ⏳ ${format(cooldown)} → ${localTime} ${killerTag}`, isReady: false };
+    if (isMissed) return { text: `${slotTag(slotNum)}⚠️ ⏳${format(cooldown)} → ${localTime} ${killerTag}`, isReady: false };
+    return { text: `${slotTag(slotNum)}⏳ ${format(cooldown)} → ${localTime} ${killerTag}`, isReady: false };
   }
-  if (cooldown >= -5 * 60 * 1000) return { text: `#${slotNum} 🟡 SPAWNED ${killerTag}`, isReady: false };
-  if (isMissed) return { text: `#${slotNum} ⚠️ ${killerTag}`, isReady: false };
-  return { text: `#${slotNum} ⚠️ ${killerTag}`, isReady: false };
-}
+  if (cooldown >= -5 * 60 * 1000) return { text: `${slotTag(slotNum)}🟡 SPAWNED ${killerTag}`, isReady: false };
+  if (isMissed) return { text: `${slotTag(slotNum)}⚠️ ${killerTag}`, isReady: false };
+  return { text: `${slotTag(slotNum)}⚠️ ${killerTag}`, isReady: false };
+  }
 
 function renderWBSlot(id, entry, slotNum) {
   const now        = Date.now();
@@ -861,22 +861,26 @@ function renderWBSlot(id, entry, slotNum) {
   const isMissed   = !!missedWindowMessages[id];
 
   if (cooldown > 0) {
-    if (isMissed) return { text: `#${slotNum} ⚠️ ⏳${format(cooldown)} → ${localTime} ${killerTag}`, isReady: false };
-    return { text: `#${slotNum} ⏳ ${format(cooldown)} → ${localTime} ${killerTag}`, isReady: false };
+    if (isMissed) return { text: `${slotTag(slotNum)}⚠️ ⏳${format(cooldown)} → ${localTime} ${killerTag}`, isReady: false };
+    return { text: `${slotTag(slotNum)}⏳ ${format(cooldown)} → ${localTime} ${killerTag}`, isReady: false };
   }
-  if (windowLeft > 0) return { text: `#${slotNum} 🟢 WIN ${format(windowLeft)} ${killerTag}`, isReady: false };
-  if (cfg.maxMissed === 0) return { text: `#${slotNum} 🟢`, isReady: true };
-  if (isMissed) return { text: `#${slotNum} ⚠️ ${killerTag}`, isReady: false };
-  return { text: `#${slotNum} ⚠️ ${killerTag}`, isReady: false };
+  if (windowLeft > 0) return { text: `${slotTag(slotNum)}🟢 WIN ${format(windowLeft)} ${killerTag}`, isReady: false };
+  if (cfg.maxMissed === 0) return { text: `${slotTag(slotNum)}🟢`, isReady: true };
+  if (isMissed) return { text: `${slotTag(slotNum)}⚠️ ${killerTag}`, isReady: false };
+  return { text: `${slotTag(slotNum)}⚠️ ${killerTag}`, isReady: false };
 }
 
 // Render all slots for a boss+server, sorted soonest at bottom (ascending = soonest last)
 // Returns array of { text, isReady }
+function slotTag(slotNum) { return slotNum != null ? `#${slotNum} ` : ""; }
+
 function renderBossSlots(prefix, key, server) {
   const slots = getActiveSlots(prefix, key, server); // sorted ascending by respawnTime
   if (!slots.length) return [];
-  return slots.map(({ id, entry }, i) => {
-    const slotNum = i + 1;
+  const multi = slots.length > 1;
+  return slots.map(({ id, entry }) => {
+    const p       = parseSlotId(id);
+    const slotNum = multi ? p?.counter ?? 1 : null;
     if (prefix === "sa") return renderSASlot(id, entry, slotNum);
     return renderWBSlot(id, entry, slotNum);
   });
