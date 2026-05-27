@@ -449,7 +449,7 @@ function restoreSpawnWarningFlags() {
     }
 
     spawnWarnings[id] = {
-      warned5:       cooldown <= 5 * 60 * 1000,
+      warned5:       cooldown <= 0,
       warned20:      cooldown <= 0 && isSAGoblin && (deadline - now) <= 20 * 60 * 1000,
       windowCreated: cooldown <= 0,
       missedHandled: false,
@@ -1101,7 +1101,8 @@ async function repinDashboard(channel) {
 
     for (const [id, w] of Object.entries(spawnWindowMessages)) {
       if (w.windowEnd + WINDOW_GRACE_MS <= now) { delete spawnWindowMessages[id]; continue; }
-      const bossLabel = getBossLabel(id);
+      const _repinParsed = parseSlotId(id);
+      const bossLabel    = _repinParsed ? `${getBossLabel(id)} S${_repinParsed.server}` : getBossLabel(id);
       const isWorld   = !!w.isWorld;
       w.msg = await channel.send({
         embeds:     [isWorld ? buildWBSpawnWindowEmbed(bossLabel, w.windowStart, w.windowEnd) : buildSASpawnWindowEmbed(bossLabel, w.windowStart, w.windowEnd)],
@@ -1116,7 +1117,8 @@ async function repinDashboard(channel) {
     for (const [id, w] of Object.entries(missedWindowMessages)) {
       if (w.nextWindowEnd + WINDOW_GRACE_MS <= now) { delete missedWindowMessages[id]; continue; }
       if (w.nextWindowStart > now) { w.msg = null; continue; }
-      const bossLabel = getBossLabel(id);
+      const _repinParsed = parseSlotId(id);
+      const bossLabel    = _repinParsed ? `${getBossLabel(id)} S${_repinParsed.server}` : getBossLabel(id);
       const isWorld   = !!w.isWorld;
       w.msg = await channel.send({
         embeds:     [isWorld ? buildWBMissedWindowEmbed(bossLabel, w.nextWindowStart, w.nextWindowEnd) : buildSAMissedWindowEmbed(bossLabel, w.nextWindowStart, w.nextWindowEnd)],
@@ -1223,7 +1225,9 @@ function checkSAWarnings(channel) {
     const isGoblin = def.type === "goblin";
     const isFixed  = !isGoblin;
     const cooldown = entry.respawnTime - now;
-    const bossLabel = `${def.label} S${p.server}`;
+    const baseSlots = getActiveSlots("sa", p.key, p.server);
+    const slotNum   = baseSlots.length > 1 ? ` #${p.counter}` : "";
+    const bossLabel = `${def.label} S${p.server}${slotNum}`;
     const bossKey   = def.key;
 
     const windowEnd      = isGoblin ? entry.respawnTime + SA_GOBLIN_WINDOW_MS : entry.respawnTime + SA_FIXED_WINDOW_MS;
@@ -1283,7 +1287,9 @@ function checkWBWarnings(channel) {
     const cooldown   = entry.respawnTime - now;
     const windowEnd  = entry.respawnTime + cfg.windowMs;
     const windowLeft = windowEnd - now;
-    const bossLabel  = `${def.label} S${p.server}`;
+   const baseSlots  = getActiveSlots("wb", p.key, p.server);
+    const slotNum    = baseSlots.length > 1 ? ` #${p.counter}` : "";
+    const bossLabel  = `${def.label} S${p.server}${slotNum}`;
 
     if (!spawnWarnings[id])
       spawnWarnings[id] = { warned5: false, warned20: false, windowCreated: false, missedHandled: false };
