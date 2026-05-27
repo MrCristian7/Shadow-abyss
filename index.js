@@ -494,7 +494,7 @@ async function recoverFromDiscordBackup() {
     const json = await response.json();
     if (!json.kills) throw new Error("Backup JSON has no 'kills' field");
     const discordActiveCount = Object.values(json.kills)
-      .filter(e => e.respawnTime >= now - 8 * HOUR).length;
+  .filter(e => e.respawnTime >= now - 8 * 60 * 60 * 1000).length;
     console.log(`[Recovery] Discord backup active: ${discordActiveCount}.`);
     if (discordActiveCount <= localActiveCount && localActiveCount > 0) {
       console.log("[Recovery] Local data is equal or fresher — skipping Discord restore.");
@@ -507,7 +507,7 @@ async function recoverFromDiscordBackup() {
     }
     const filtered = {};
     for (const [id, entry] of Object.entries(json.kills)) {
-      if (entry.respawnTime >= now - 8 * HOUR) filtered[id] = entry;
+    if (entry.respawnTime >= now - 8 * 60 * 60 * 1000) filtered[id] = entry;
     }
     data = { kills: filtered, slotCounter: json.slotCounter ?? {} };
     save();
