@@ -636,15 +636,42 @@ function stripPings(content) {
   return content.replace(/@everyone/g, "everyone").replace(/@here/g, "here");
 }
 
-// All kill and admin announcements now go to LOG_CHANNEL_ID only
 async function announceKill(user, slotId, entry) {
-  await postKillLog(slotId, entry);
+  const p     = parseSlotId(slotId);
+  if (!p) return;
+  const label = p.prefix === "sa" ? (getSADef(p.key)?.label ?? p.key) : (getWBDef(p.key)?.label ?? p.key);
+  const type  = p.prefix === "sa" ? "Shadow Abyss" : "World Boss";
+  const content =
+    `⚔️ **${entry.lastKiller}** killed **[${type}] ${label} S${p.server}**\n` +
+    `🕒 Kill: ${toServerDateTimeStr(entry.killTime)} — 🔄 Respawn: ${toServerDateTimeStr(entry.respawnTime)}`;
+  try {
+    const channel = dashboardMessage?.channel
+      ?? await client.channels.fetch(CHANNEL_ID).catch(() => null);
+    if (channel) {
+      const msg = await channel.send({ content, flags: MessageFlags.SuppressNotifications });
+      setTimeout(() => {
+        msg.delete().catch(() => {});
+        postToLogChannel(stripPings(content));
+      }, 5 * 60 * 1000);
+    }
+  } catch (err) { console.error("[AnnounceKill]", err.message ?? err); }
   log(user, `KILL ${getBossLabel(slotId)} — ${toServerDateTimeStr(entry.killTime)}`);
 }
 
 async function announceAdmin(user, action) {
+  const content = `📢 **${user.username}** ${action} — ${toServerDateTimeStr(Date.now())} (server time)`;
+  try {
+    const channel = dashboardMessage?.channel
+      ?? await client.channels.fetch(CHANNEL_ID).catch(() => null);
+    if (channel) {
+      const msg = await channel.send({ content, flags: MessageFlags.SuppressNotifications });
+      setTimeout(() => {
+        msg.delete().catch(() => {});
+        postToLogChannel(stripPings(content));
+      }, 5 * 60 * 1000);
+    }
+  } catch (err) { console.error("[AnnounceAdmin]", err.message ?? err); }
   log(user, action);
-  await postToLogChannel(`📢 **${user.username}** ${action} — ${toServerDateTimeStr(Date.now())} (server time)`);
 }
 
 // =====================
