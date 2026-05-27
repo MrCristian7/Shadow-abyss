@@ -646,7 +646,7 @@ function stripPings(content) {
 async function announceKill(user, slotId, entry) {
   const p     = parseSlotId(slotId);
   if (!p) return;
-  const label = p.prefix === "sa" ? (getSADef(p.key)?.label ?? p.key) : (getWBDef(p.key)?.label ?? p.key);
+  const label = getBossLabel(slotId);
   const type  = p.prefix === "sa" ? "Shadow Abyss" : "World Boss";
   const content =
     `⚔️ **${entry.lastKiller}** killed **[${type}] ${label} S${p.server}**\n` +
