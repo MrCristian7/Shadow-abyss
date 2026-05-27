@@ -723,7 +723,7 @@ function buildSASpawnWindowEmbed(bossLabel, windowStart, windowEnd) {
   return new EmbedBuilder()
     .setTitle(`🟢 [Shadow Abyss] ${bossLabel} — Spawn window active`)
     .setColor(0x00aaff)
-    .setDescription(desc);
+    .setDescription(`**${bossLabel}**\n${desc}`);
 }
 
 function buildWBSpawnWindowEmbed(bossLabel, windowStart, windowEnd) {
@@ -736,7 +736,7 @@ function buildWBSpawnWindowEmbed(bossLabel, windowStart, windowEnd) {
   return new EmbedBuilder()
     .setTitle(`🟢 [World Boss] ${bossLabel} — Spawn window active`)
     .setColor(0x00cc66)
-    .setDescription(desc);
+    .setDescription(`**${bossLabel}**\n${desc}`);
 }
 
 function buildSASpawnWindowComponents(id) {
