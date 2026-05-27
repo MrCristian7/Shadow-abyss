@@ -504,7 +504,6 @@ async function recoverFromDiscordBackup() {
       console.log("[Recovery] No active timers in either source — nothing to restore.");
       return false;
     }
-    }
     const filtered = {};
     for (const [id, entry] of Object.entries(json.kills)) {
     if (entry.respawnTime >= now - 8 * 60 * 60 * 1000) filtered[id] = entry;
