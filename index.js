@@ -516,6 +516,7 @@ async function recoverFromDiscordBackup() {
     console.error("[Recovery] Failed:", err);
     return false;
   }
+}
 
 
 // =====================
