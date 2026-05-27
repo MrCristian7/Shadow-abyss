@@ -1124,23 +1124,6 @@ async function repinDashboard(channel) {
         flags: MessageFlags.SuppressNotifications
       }).catch(() => null);
     }
-      clearTimeout(w.deleteTimer);
-      const deleteAfter = (w.windowEnd - now) + WINDOW_GRACE_MS;
-      w.deleteTimer = setTimeout(() => { if (w.msg) w.msg.delete().catch(() => {}); delete spawnWindowMessages[id]; }, Math.max(deleteAfter, 0));
-    }
-
-    for (const [id, w] of Object.entries(missedWindowMessages)) {
-      if (w.nextWindowEnd + WINDOW_GRACE_MS <= now) { delete missedWindowMessages[id]; continue; }
-      if (w.nextWindowStart > now) { w.msg = null; continue; }
-      const _repinParsed = parseSlotId(id);
-      const bossLabel    = _repinParsed ? `${getBossLabel(id)} S${_repinParsed.server}` : getBossLabel(id);
-      const isWorld   = !!w.isWorld;
-      w.msg = await channel.send({
-        embeds:     [isWorld ? buildWBMissedWindowEmbed(bossLabel, w.nextWindowStart, w.nextWindowEnd) : buildSAMissedWindowEmbed(bossLabel, w.nextWindowStart, w.nextWindowEnd)],
-        components: isWorld ? buildWBMissedWindowComponents(id) : buildSAMissedWindowComponents(id),
-        flags: MessageFlags.SuppressNotifications
-      }).catch(() => null);
-    }
 
     lastRepinTime     = now;
     actionsSinceRepin = 0;
