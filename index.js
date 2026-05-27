@@ -182,7 +182,9 @@ function getBossLabel(slotId) {
   const p = parseSlotId(slotId);
   if (!p) return slotId;
   const label = p.prefix === "sa" ? (getSADef(p.key)?.label ?? p.key) : (getWBDef(p.key)?.label ?? p.key);
-  return `${label} #${p.counter}`;
+  const base  = makeSlotPrefix(p.prefix, p.key, p.server);
+  const count = Object.keys(data.kills).filter(id => id.startsWith(base + "_")).length;
+  return count > 1 ? `${label} #${p.counter}` : label;
 }
 
 function getBossType(slotId) {
@@ -494,9 +496,14 @@ async function recoverFromDiscordBackup() {
     const discordActiveCount = Object.values(json.kills)
       .filter(e => e.respawnTime >= now - 8 * HOUR).length;
     console.log(`[Recovery] Discord backup active: ${discordActiveCount}.`);
-    if (discordActiveCount <= localActiveCount) {
-      console.log("[Recovery] Local data fresher — skipping restore.");
+    if (discordActiveCount <= localActiveCount && localActiveCount > 0) {
+      console.log("[Recovery] Local data is equal or fresher — skipping Discord restore.");
       return false;
+    }
+    if (discordActiveCount === 0 && localActiveCount === 0) {
+      console.log("[Recovery] No active timers in either source — nothing to restore.");
+      return false;
+    }
     }
     const filtered = {};
     for (const [id, entry] of Object.entries(json.kills)) {
