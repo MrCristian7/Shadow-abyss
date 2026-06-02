@@ -1272,7 +1272,7 @@ function checkSAWarnings(channel) {
     // 5-minute pre-spawn warning
     if (cooldown > 0 && cooldown <= 5 * 60 * 1000 && !w.warned5) {
       w.warned5 = true;
-      postEveryoneWarning(channel, `${id}_5min`, `@everyone ⏳ **[Shadow Abyss] ${bossLabel}** spawns in 5 minutes`, Math.max(cooldown, 0));
+      postEveryoneWarning(channel, `${id}_5min`, `@here ⏳ **[Shadow Abyss] ${bossLabel}** spawns in 5 minutes`, Math.max(cooldown, 0));
     }
 
     // Goblin: open spawn window card
@@ -1286,7 +1286,7 @@ function checkSAWarnings(channel) {
     // Goblin: 20-minute closing warning
     if (isGoblin && cooldown <= 0 && windowLeft > 0 && windowLeft <= 20 * 60 * 1000 && !w.warned20) {
       w.warned20 = true;
-      postEveryoneWarning(channel, `${id}_20min`, `@everyone ⚠️ **[Shadow Abyss] ${bossLabel}** goblin window closes in 20 minutes!`);
+      postEveryoneWarning(channel, `${id}_20min`, `@here ⚠️ **[Shadow Abyss] ${bossLabel}** goblin window closes in 20 minutes!`);
     }
 
     // Fixed boss: open spawn window card + @everyone spawn notification
@@ -1297,7 +1297,7 @@ function checkSAWarnings(channel) {
       createSASpawnWindow(id, entry, bossLabel, channel, anchoredFixedWindowEnd);
       const tsRespawn = Math.floor(entry.respawnTime / 1000);
       postEveryoneWarning(channel, `${id}_spawned`,
-        `@everyone 🌑 **[Shadow Abyss] ${bossLabel}** has spawned! Log the kill when done.\n<t:${tsRespawn}:t>`,
+  `@here 🌑 **[Shadow Abyss] ${bossLabel}** has spawned! Log the kill when done.\n<t:${tsRespawn}:t>`,
         Math.min(10 * 60 * 1000, windowLeft));
     }
 
@@ -1339,7 +1339,7 @@ function checkWBWarnings(channel) {
     // 5-minute pre-spawn warning
     if (cooldown > 0 && cooldown <= 5 * 60 * 1000 && !w.warned5) {
       w.warned5 = true;
-      postEveryoneWarning(channel, `${id}_5min`, `@everyone ⏳ **[World Boss] ${bossLabel}** spawns in 5 minutes`, Math.max(cooldown, 0), p.key);
+      postEveryoneWarning(channel, `${id}_5min`, `@here ⏳ **[World Boss] ${bossLabel}** spawns in 5 minutes`, Math.max(cooldown, 0), p.key);
     }
 
     // Open spawn window card
@@ -1353,7 +1353,7 @@ function checkWBWarnings(channel) {
     // 20-minute closing warning (only for long windows like Borgar's 1h window)
     if (cfg.windowMs > 20 * 60 * 1000 && cooldown <= 0 && windowLeft > 0 && windowLeft <= 20 * 60 * 1000 && !w.warned20) {
       w.warned20 = true;
-      postEveryoneWarning(channel, `${id}_20min`, `@everyone ⚠️ **[World Boss] ${bossLabel}** spawn window closes in 20 minutes!`, EVERYONE_WARNING_LIFESPAN_MS, p.key);
+      postEveryoneWarning(channel, `${id}_20min`, `@here ⚠️ **[World Boss] ${bossLabel}** spawn window closes in 20 minutes!`, EVERYONE_WARNING_LIFESPAN_MS, p.key);
     }
 
     // Missed window: free slot after deadline + grace
