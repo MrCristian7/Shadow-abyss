@@ -1356,11 +1356,14 @@ function checkWBWarnings(channel) {
 
     // Open spawn window card
     if (cooldown <= 0 && windowLeft > 0 && !w.windowCreated) {
-      w.windowCreated = true;
-      clearEveryoneWarning(`${id}_5min`);
-      // FIX: pass anchoredWindowEnd — always based on entry.respawnTime
-      createWBSpawnWindow(id, entry, bossLabel, channel, anchoredWindowEnd);
-    }
+  w.windowCreated = true;
+  clearEveryoneWarning(`${id}_5min`);
+  createWBSpawnWindow(id, entry, bossLabel, channel, anchoredWindowEnd);
+  const tsRespawn = Math.floor(entry.respawnTime / 1000);
+  postEveryoneWarning(channel, `${id}_spawned`,
+    `@here 🌍 **[World Boss] ${bossLabel}** has spawned! Log the kill when done.\n<t:${tsRespawn}:t>`,
+    Math.min(10 * 60 * 1000, windowLeft), p.key);
+}
 
     // 20-minute closing warning (only for long windows like Borgar's 1h window)
     if (cfg.windowMs > 20 * 60 * 1000 && cooldown <= 0 && windowLeft > 0 && windowLeft <= 20 * 60 * 1000 && !w.warned20) {
