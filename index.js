@@ -716,7 +716,7 @@ async function announceAdmin(user, action) {
 async function postEveryoneWarning(channel, key, content, lifespanMs = EVERYONE_WARNING_LIFESPAN_MS, bossKey = null) {
   await clearEveryoneWarning(key);
   const suppressPing = bossKey && NO_EVERYONE_PING_KEYS.has(bossKey);
-  const sendContent  = suppressPing ? content.replace(/@everyone /g, "") : content;
+  const sendContent  = suppressPing ? content.replace(/@everyone /g, "").replace(/@here /g, "") : content;
   const sendOptions  = suppressPing
     ? { content: sendContent, flags: MessageFlags.SuppressNotifications }
     : { content: sendContent };
