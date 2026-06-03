@@ -29,7 +29,16 @@ const {
 } = require("discord.js");
 const fs = require("fs");
 
+const DATA_DIR   = process.env.DATA_DIR || "/app/data";
+const DATA_FILE  = `${DATA_DIR}/sa_data.json`;
+const BACKUP_DIR = `${DATA_DIR}/sa_backups`;
+
+// Ensure persistent data directories exist on startup
+if (!fs.existsSync(DATA_DIR))   fs.mkdirSync(DATA_DIR,   { recursive: true });
+if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
+
 const TOKEN          = process.env.SA_BOT_TOKEN;
+
 const CHANNEL_ID     = "1508012091414679622";
 const LOG_CHANNEL_ID = "1507303243812704406";
 
@@ -266,19 +275,21 @@ function formatSeconds(ms) {
 // SAVE / LOAD
 // =====================
 function load() {
-  if (fs.existsSync("sa_data.json")) {
+  if (fs.existsSync(DATA_FILE)) {
     try {
-      data = JSON.parse(fs.readFileSync("sa_data.json", "utf8"));
+      data = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
     } catch { data = {}; }
   }
   if (!data.kills)       data.kills       = {};
   if (!data.slotCounter) data.slotCounter  = {};
 }
 
+
 function save() {
-  fs.writeFileSync("sa_data.json.tmp", JSON.stringify(data, null, 2));
-  fs.renameSync("sa_data.json.tmp", "sa_data.json");
+  fs.writeFileSync(DATA_FILE + ".tmp", JSON.stringify(data, null, 2));
+  fs.renameSync(DATA_FILE + ".tmp", DATA_FILE);
 }
+
 
 // =====================
 // LOGGING
@@ -483,9 +494,10 @@ function restoreSpawnWarningFlags() {
 async function recoverFromDiscordBackup() {
   const now = Date.now();
   let localActiveCount = 0;
-  if (fs.existsSync("sa_data.json")) {
+  if (fs.existsSync(DATA_FILE)) {
     try {
-      const d = JSON.parse(fs.readFileSync("sa_data.json", "utf8"));
+      const d = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+
       if (d.kills) {
         localActiveCount = Object.values(d.kills)
           .filter(e => e.respawnTime >= now - 8 * HOUR).length;
@@ -543,16 +555,16 @@ const BACKUP_INTERVAL_MS = 60 * 60 * 1000;
 const MAX_LOCAL_BACKUPS  = 48;
 
 function saveLocalBackup() {
-  if (!fs.existsSync("sa_backups")) fs.mkdirSync("sa_backups");
   const stamp    = new Date().toISOString().replace(/:/g, "-").replace("T", "_").slice(0, 16);
-  const filename = `sa_backups/sa_data.backup-${stamp}.json`;
+  const filename = `${BACKUP_DIR}/sa_data.backup-${stamp}.json`;
   fs.writeFileSync(filename, JSON.stringify(data, null, 2));
-  const files = fs.readdirSync("sa_backups")
+  const files = fs.readdirSync(BACKUP_DIR)
     .filter(f => f.startsWith("sa_data.backup-") && f.endsWith(".json")).sort();
   if (files.length > MAX_LOCAL_BACKUPS)
-    files.slice(0, files.length - MAX_LOCAL_BACKUPS).forEach(f => fs.unlinkSync(`sa_backups/${f}`));
+    files.slice(0, files.length - MAX_LOCAL_BACKUPS).forEach(f => fs.unlinkSync(`${BACKUP_DIR}/${f}`));
   return filename;
 }
+
 
 // =====================
 // BACKUP — Discord
